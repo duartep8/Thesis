@@ -29,6 +29,17 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Work with parquet; read big files in chunks or by columns.
 - `data/test_sample.parquet` (once created): small version for quick tests.
 
+## Data decisions
+- Source: JKP Global Factor Data (WRDS), US only, common stocks, main exchange,
+  one security per firm, CRSP stocks only (`source_crsp = 1`), so `id` = PERMNO.
+- Drop rows with missing `me` (rare). Keep rows with a missing `ret_exc_lead1m`
+  (dropped only at training) to avoid look-ahead.
+- Characteristics: JKP's 153, ranked each month across the universe to [−1, 1];
+  missing values = 0 (the median), following Gu, Kelly & Xiu (2020). No winsorizing.
+- Universe: the 1,000 largest stocks by `me` each month.
+- A held stock with a missing return counts as 0 and is logged; missing spread or
+  volume is filled with that month's size-decile median.
+
 ## Working rules
 - Go step by step: explain what you will do, wait for my OK, then do it.
 - One script per step in `src/`, numbered (01_, 02_, ...).
