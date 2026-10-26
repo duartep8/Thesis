@@ -218,3 +218,12 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data (licensed WRDS data, never commit)
+data/
+*.parquet
+*.sas7bdat
+
+# Saved models and large outputs
+models/
+predictions/
