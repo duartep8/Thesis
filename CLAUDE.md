@@ -9,19 +9,30 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Use: each month, sort stocks by predicted return; long the top 10%, short the bottom 10%.
 
 ## Current plan (agreed with supervisor; details may change)
-- Models: elastic net, boosted trees (LightGBM), small neural network.
-- Part 1: for each model, compare training+validation window lengths
-  (e.g. 5 vs 10 years) and training once vs retraining every year.
-- Part 2: value of retraining: compare A (last year's model, unchanged)
-  with C (retrained with the new year), over the same months.
-- Measures: out-of-sample R² and, mainly, the Sharpe ratio of the long–short portfolio.
-- Benchmark: Fama–French 5 factors (and possibly momentum): alphas.
+- Models: elastic net, boosted trees (LightGBM), small neural network (1–2 seeds).
+- Part 1: for each model, a grid of window × training frequency.
+  - Windows: rolling 5, 10 and 15 years of training + validation, plus expanding
+    (from the start of the data).
+  - Frequency: trained once (fit on data up to the year before the test period,
+    then kept unchanged) or retrained every year.
+  - The longest window (15 years) sets the first test year (about 1978). Confirm
+    the start year after checking characteristic coverage in the full data.
+  - All setups predict the same test period, so R² and Sharpe ratios are comparable.
+  - Report the full grid; never pick a best window using test data.
+- Training/validation split inside each window: a baseline split, plus a few
+  variations as a sensitivity check.
+- Hyperparameters: Part 1, tuned separately for each window setup (at its first fit).
+  Part 2, tuned once and then fixed.
+- Part 2 (A vs C, value of retraining): for all three models, in the expanding,
+  yearly-retrained setup, over the same months. C = this December's refit on all
+  data so far; A = last December's model, unchanged. No extra fits needed.
+- Measures: out-of-sample R² (Gu, Kelly & Xiu, no demeaning) and, mainly, the
+  Sharpe ratio of the decile long–short portfolio; alphas against
+  Fama–French 5 (+ momentum).
+- Trading costs: likely in the thesis; keep the code ready for them.
 
 ## Still open (do not assume)
-- Rolling vs expanding windows; training/validation split inside a window.
-- Hyperparameters: tuned once or at every retrain.
 - Neural network size.
-- Trading costs and turnover.
 
 ## Data
 - `data/` holds the JKP Global Factor Data from WRDS (licensed):
