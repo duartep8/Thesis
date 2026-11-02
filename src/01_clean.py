@@ -7,7 +7,7 @@ The input may be one or several CSV or parquet files (e.g. split by decade). The
 read with DuckDB, which streams them; the full data is never loaded into memory.
 
 Steps (rows are counted at each one):
-  1. keep excntry = 'USA'
+  1. keep excntry = 'USA' (applied while reading, so non-US rows are never loaded)
   2. check that common, exch_main, primary_sec and obs_main are all 1 (stop if not)
   3. keep source_crsp = 1, so id is the PERMNO and returns come from CRSP
   4. check that (id, eom) is unique (stop if not)
@@ -76,8 +76,8 @@ def columns_of(con, f):
         return next(csv.reader(fh))
 
 
-def file_query(f, cols, needed):
-    """SELECT of the needed columns from one file, cast to fixed types."""
+def file_query(f, cols, needed, where=None):
+    """SELECT of the needed columns from one file, cast to fixed types, optionally filtered."""
     missing = [c for c in needed if c not in cols]
     if missing:
         sys.exit(f"{f} lacks {len(missing)} needed columns, e.g. {missing[:10]}")
@@ -88,7 +88,7 @@ def file_query(f, cols, needed):
         types = ", ".join(f"{sql_str(c)}: {sql_str(needed.get(c, 'VARCHAR'))}" for c in cols)
         source = f"read_csv({sql_str(f)}, header = true, types = {{{types}}})"
     select = ", ".join(f'CAST("{c}" AS {t}) AS "{c}"' for c, t in needed.items())
-    return f"SELECT {select} FROM {source}"
+    return f"SELECT {select} FROM {source}" + (f" WHERE {where}" if where else "")
 
 
 def main():
@@ -120,11 +120,14 @@ def main():
 
     print(f"Reading {len(files)} file(s): {', '.join(Path(f).name for f in files)}")
     print(f"Characteristics: {args.chars} ({len(chars)} columns incl. {', '.join(ALWAYS_KEEP)})")
-    con.execute("CREATE TABLE d AS " + " UNION ALL ".join(file_query(f, file_cols[f], needed) for f in files))
+    n_in = con.execute("SELECT count(*) FROM (" + " UNION ALL ".join(
+        file_query(f, file_cols[f], needed) for f in files) + ")").fetchone()[0]
+    con.execute("CREATE TABLE d AS " + " UNION ALL ".join(
+        file_query(f, file_cols[f], needed, where="excntry = 'USA'") for f in files))
 
     count = lambda: con.execute("SELECT count(*) FROM d").fetchone()[0]
-    report = []
-    n_in = n = count()
+    n = count()
+    report = [("keep excntry = 'USA'", f"-{n_in - n:,}", f"{n:,}")]
 
     def drop(label, where):
         nonlocal n
@@ -132,8 +135,6 @@ def main():
         new = count()
         report.append((label, f"-{n - new:,}", f"{new:,}"))
         n = new
-
-    drop("keep excntry = 'USA'", "excntry IS DISTINCT FROM 'USA'")
 
     bad = con.execute("SELECT " + ", ".join(f"count(*) FILTER ({c} IS DISTINCT FROM 1)" for c in SCREENS)
                       + " FROM d").fetchone()

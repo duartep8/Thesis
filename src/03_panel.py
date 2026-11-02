@@ -2,6 +2,7 @@
 
 Usage:
     python src/03_panel.py [--input data/clean.parquet] [--out data/panel.parquet] [--universe 1000]
+                           [--reports data/reports]
 
 Steps, each using only the month-t cross-section (no look-ahead):
   1. universe: the 1,000 largest stocks by me in each month (ties broken by id);
@@ -13,6 +14,10 @@ Steps, each using only the month-t cross-section (no look-ahead):
   4. the 153 JKP characteristics ranked each month to [-1, 1]: x = 2(r - 1)/(n - 1) - 1,
      with average ranks r among the n stocks that have a value; missing values = 0
      (Gu, Kelly & Xiu 2020). No winsorizing.
+The report also gives stocks per month, the missing-target share by year, the 20 largest
+and smallest ret_exc_lead1m in the universe, and each characteristic's first month and
+missing share by decade within the universe (before filling), saved to
+<reports>/coverage_by_decade.csv.
 """
 
 import argparse
@@ -22,6 +27,7 @@ from pathlib import Path
 
 import duckdb
 import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 CHARS_153_FILE = ROOT / "src" / "characteristics_153.txt"
@@ -38,6 +44,7 @@ def main():
     parser.add_argument("--input", default=str(ROOT / "data" / "clean.parquet"))
     parser.add_argument("--out", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--universe", type=int, default=1000, help="largest stocks by me per month (default 1000)")
+    parser.add_argument("--reports", default=str(ROOT / "data" / "reports"), help="folder for coverage_by_decade.csv")
     args = parser.parse_args()
     t0 = time.time()
     N = args.universe
@@ -93,6 +100,11 @@ def main():
     miss_share = df[chars].isna().mean()
     has_data = by_month[chars].count() > 0
     first_month = has_data.idxmax().where(has_data.any())
+    # Missing share by decade within the universe, before missing values become 0
+    coverage = df[chars].isna().groupby(df["eom"].dt.year // 10 * 10).mean().T
+    decades = [f"{d}s" for d in coverage.columns]
+    coverage.columns = decades
+    coverage.insert(0, "first_month", first_month.reindex(chars))
     ranks = by_month[chars].rank(method="average")
     n_obs = by_month[chars].transform("count")
     ranked = (2 * (ranks - 1) / (n_obs - 1) - 1).fillna(0)  # n = 1 gives 0/0 -> 0
@@ -117,6 +129,31 @@ def main():
     print(f"Months with fewer than {N:,} stocks: {len(short)}"
           + (f" (min {short.min():,}, e.g. {[d.date().isoformat() for d in short.index[:3]]})" if len(short) else ""))
     print(f"Rows with missing ret_exc_lead1m (kept): {no_target:,}")
+    print(f"Stocks per month: " + (f"exactly {N:,} in every month" if (months == N).all() else f"not always {N:,}")
+          + "; by decade (min-max): " + ", ".join(f"{d}s {g.min():,}-{g.max():,}"
+                                                for d, g in months.groupby(months.index.year // 10 * 10)))
+    last = months.index.max()
+    miss_target = df["ret_exc_lead1m"].isna().groupby(df["eom"].dt.year).mean()
+    print(f"Missing ret_exc_lead1m: {no_target / len(df):.2%} of rows; in the last month ({last.date()}) "
+          f"{df.loc[df['eom'] == last, 'ret_exc_lead1m'].isna().mean():.0%}. By year:")
+    items = [f"{y} {v:6.2%}" for y, v in miss_target.items()]
+    for i in range(0, len(items), 8):
+        print("  " + "   ".join(items[i:i + 8]))
+
+    ret = df[["id", "eom", "me", "ret_exc_lead1m"]]
+    ext = pd.concat([ret.nlargest(20, "ret_exc_lead1m").assign(side="largest"),
+                     ret.nsmallest(20, "ret_exc_lead1m").assign(side="smallest")])[
+        ["side", "id", "eom", "me", "ret_exc_lead1m"]]
+    ext["pos"] = range(len(ext))
+    con.register("ext", ext)
+    ext = con.execute(f"SELECT e.*, s.me AS me_next FROM ext e LEFT JOIN {src} s ON s.id = e.id "
+                      "AND s.eom = last_day(CAST(e.eom AS DATE) + INTERVAL 1 MONTH) ORDER BY e.pos").df()
+    print(f"\nExtreme ret_exc_lead1m in the universe (me in USD million; me_next = the stock's me "
+          f"in month t+1 in {Path(args.input).name}, blank if absent):")
+    print(f"  {'':9} {'id':>7} {'eom':<10} {'ret_exc_lead1m':>15} {'me':>12} {'me_next':>12} {'me_next/me':>10}")
+    for r in ext.itertuples():
+        nxt = f"{r.me_next:>12,.1f} {r.me_next / r.me:>10.3f}" if pd.notna(r.me_next) else ""
+        print(f"  {r.side:<9} {r.id:>7} {str(r.eom)[:10]:<10} {r.ret_exc_lead1m:>15,.4f} {r.me:>12,.1f} {nxt}")
 
     print(f"\nMissing characteristics before ranking: {miss_share.mean():.1%} of all values")
     print("Most missing: " + ", ".join(f"{c} {s:.1%}" for c, s in miss_share.nlargest(10).items()))
@@ -125,8 +162,18 @@ def main():
     late = late[late > months.index.min()].sort_values()
     print(f"Characteristics with no data in the first month: {len(late) + len(never)}"
           + (f"; never any data: {never}" if never else ""))
-    for c, m in late.items():
-        print(f"  {c:<22} first data {m.date()}")
+
+    reports = Path(args.reports)
+    reports.mkdir(parents=True, exist_ok=True)
+    coverage.to_csv(reports / "coverage_by_decade.csv", index_label="characteristic", float_format="%.4f")
+    print("Missing share of the 153 characteristics by decade, within the universe, before filling:")
+    print(f"  {'decade':<8}{'mean':>7}{'> 20%':>7}{'> 50%':>7}")
+    for d in decades:
+        print(f"  {d:<8}{coverage[d].mean():>7.1%}{(coverage[d] > 0.2).sum():>7}{(coverage[d] > 0.5).sum():>7}")
+    print(f"\n  {'characteristic':<22}{'first data':<11}" + "".join(f"{d:>7}" for d in decades))
+    for c, r in coverage.sort_values("first_month", kind="stable").iterrows():
+        print(f"  {c:<22}{str(r['first_month'])[:7]:<11}" + "".join(f"{r[d]:>7.0%}" for d in decades))
+    print(f"  (saved to {reports / 'coverage_by_decade.csv'})")
 
     print("\nLiquidity fill (missing -> eom x size_decile median, month median, still missing):")
     for c, n_miss, n_dec, n_mon, n_left in fill_report:
