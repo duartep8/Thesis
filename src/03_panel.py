@@ -2,11 +2,18 @@
 
 Usage:
     python src/03_panel.py [--input data/clean.parquet] [--out data/panel.parquet] [--universe 1000]
-                           [--reports data/reports]
+                           [--start-year 1975] [--reports data/reports]
 
 Steps, each using only the month-t cross-section (no look-ahead):
-  1. universe: the 1,000 largest stocks by me in each month (ties broken by id);
-     rows with a missing ret_exc_lead1m stay in (they are dropped only at training)
+  1. universe: from January of the start year (1975), the 1,000 largest stocks by me in each
+     month (ties broken by id); rows with a missing ret_exc_lead1m stay in (they are
+     dropped only at training)
+  1b. suspect returns: ret_exc_lead1m <= -0.90 while the stock's me in t+1 is at least 50%
+     of its me in t (a near-total loss that the market value does not show). The original
+     is kept in ret_exc_lead1m_raw, ret_exc_lead1m_suspect flags the row, and
+     ret_exc_lead1m is set to missing (dropped from training; 0 and logged in portfolios).
+     This touches only the target, which is month t+1 information anyway; me in t+1 is
+     not kept in the panel.
   2. size_decile (1-10): me deciles within the universe each month
   3. raw liquidity for trading costs: bidaskhl_21d_raw and dolvol_126d_raw, copied before
      ranking; missing values filled with the eom x size_decile median, else the month
@@ -44,6 +51,7 @@ def main():
     parser.add_argument("--input", default=str(ROOT / "data" / "clean.parquet"))
     parser.add_argument("--out", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--universe", type=int, default=1000, help="largest stocks by me per month (default 1000)")
+    parser.add_argument("--start-year", type=int, default=1975, help="first year of the panel (default 1975)")
     parser.add_argument("--reports", default=str(ROOT / "data" / "reports"), help="folder for coverage_by_decade.csv")
     args = parser.parse_args()
     t0 = time.time()
@@ -60,14 +68,20 @@ def main():
 
     # 1. Universe
     n_in = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
-    available = con.execute(f"SELECT eom, count(*) AS n FROM {src} GROUP BY eom").df().set_index("eom")["n"]
-    select = ", ".join(f'"{c}"' for c in KEYS + chars)
+    start = f"DATE '{args.start_year}-01-01'"
+    n_from_start = con.execute(f"SELECT count(*) FROM {src} WHERE eom >= {start}").fetchone()[0]
+    available = con.execute(f"SELECT eom, count(*) AS n FROM {src} WHERE eom >= {start} "
+                            "GROUP BY eom").df().set_index("eom")["n"]
+    select = ", ".join(f'u."{c}"' for c in KEYS + chars)
+    # me_lead1m: the same stock's me at the next month end, if it is in the input (for step 1b only)
     df = con.execute(f"""
-        SELECT {select} FROM (
-            SELECT *, row_number() OVER (PARTITION BY eom ORDER BY me DESC, id) AS rank_me FROM {src}
-        )
-        WHERE rank_me <= {N}
-        ORDER BY eom, id""").df()
+        SELECT {select}, n.me AS me_lead1m FROM (
+            SELECT *, row_number() OVER (PARTITION BY eom ORDER BY me DESC, id) AS rank_me
+            FROM {src} WHERE eom >= {start}
+        ) u
+        LEFT JOIN (SELECT id, eom, me FROM {src}) n ON n.id = u.id AND n.eom = last_day(u.eom + INTERVAL 1 MONTH)
+        WHERE u.rank_me <= {N}
+        ORDER BY u.eom, u.id""").df()
     months = df.groupby("eom").size()
     if df.duplicated(["id", "eom"]).any():
         sys.exit("Duplicate (id, eom) rows in the universe")
@@ -75,6 +89,14 @@ def main():
     if len(months) != len(available) or (months != expected).any():
         sys.exit("Some months do not have min(universe, available) stocks")
     short = months[months < N]
+    no_target_raw = int(df["ret_exc_lead1m"].isna().sum())
+
+    # 1b. Suspect returns (NaN me_lead1m compares False, so stocks absent in t+1 are not flagged)
+    suspect = (df["ret_exc_lead1m"] <= -0.90) & (df["me_lead1m"] >= 0.5 * df["me"])
+    flagged = df.loc[suspect, ["id", "eom", "me", "me_lead1m", "ret_exc_lead1m"]].copy()
+    df["ret_exc_lead1m_raw"] = df["ret_exc_lead1m"]
+    df["ret_exc_lead1m_suspect"] = suspect
+    df.loc[suspect, "ret_exc_lead1m"] = np.nan
     no_target = int(df["ret_exc_lead1m"].isna().sum())
 
     # 2. Size deciles within the universe (df is sorted by eom, id, so ties in me go by id)
@@ -113,7 +135,7 @@ def main():
     df[chars] = ranked.astype("float32")
 
     # Write
-    extra = ["size_decile"] + [f"{c}_raw" for c in LIQUIDITY] + [f"{c}_filled" for c in LIQUIDITY]
+    extra = ["ret_exc_lead1m_raw", "ret_exc_lead1m_suspect", "size_decile"] + [f"{c}_raw" for c in LIQUIDITY] + [f"{c}_filled" for c in LIQUIDITY]
     panel = df[KEYS + extra + chars]
     out = Path(args.out)
     tmp_out = out.with_suffix(".parquet.tmp")
@@ -123,12 +145,13 @@ def main():
     tmp_out.replace(out)
 
     # Report
-    print(f"Input: {args.input} ({n_in:,} rows, {len(available)} months)")
+    print(f"Input: {args.input} ({n_in:,} rows; from {args.start_year}: {n_from_start:,} rows, {len(available)} months)")
     print(f"Universe: {N:,} largest by me per month -> {len(df):,} rows, "
           f"{months.index.min().date()} to {months.index.max().date()}")
     print(f"Months with fewer than {N:,} stocks: {len(short)}"
           + (f" (min {short.min():,}, e.g. {[d.date().isoformat() for d in short.index[:3]]})" if len(short) else ""))
-    print(f"Rows with missing ret_exc_lead1m (kept): {no_target:,}")
+    print(f"Rows with missing ret_exc_lead1m (kept): {no_target:,} = {no_target_raw:,} missing in the data "
+          f"+ {len(flagged):,} suspect, set to missing")
     print(f"Stocks per month: " + (f"exactly {N:,} in every month" if (months == N).all() else f"not always {N:,}")
           + "; by decade (min-max): " + ", ".join(f"{d}s {g.min():,}-{g.max():,}"
                                                 for d, g in months.groupby(months.index.year // 10 * 10)))
@@ -140,20 +163,23 @@ def main():
     for i in range(0, len(items), 8):
         print("  " + "   ".join(items[i:i + 8]))
 
-    ret = df[["id", "eom", "me", "ret_exc_lead1m"]]
-    ext = pd.concat([ret.nlargest(20, "ret_exc_lead1m").assign(side="largest"),
-                     ret.nsmallest(20, "ret_exc_lead1m").assign(side="smallest")])[
-        ["side", "id", "eom", "me", "ret_exc_lead1m"]]
-    ext["pos"] = range(len(ext))
-    con.register("ext", ext)
-    ext = con.execute(f"SELECT e.*, s.me AS me_next FROM ext e LEFT JOIN {src} s ON s.id = e.id "
-                      "AND s.eom = last_day(CAST(e.eom AS DATE) + INTERVAL 1 MONTH) ORDER BY e.pos").df()
-    print(f"\nExtreme ret_exc_lead1m in the universe (me in USD million; me_next = the stock's me "
-          f"in month t+1 in {Path(args.input).name}, blank if absent):")
-    print(f"  {'':9} {'id':>7} {'eom':<10} {'ret_exc_lead1m':>15} {'me':>12} {'me_next':>12} {'me_next/me':>10}")
-    for r in ext.itertuples():
-        nxt = f"{r.me_next:>12,.1f} {r.me_next / r.me:>10.3f}" if pd.notna(r.me_next) else ""
-        print(f"  {r.side:<9} {r.id:>7} {str(r.eom)[:10]:<10} {r.ret_exc_lead1m:>15,.4f} {r.me:>12,.1f} {nxt}")
+    def show(rows, side):
+        for r in rows.itertuples():
+            nxt = f"{r.me_lead1m:>12,.1f} {r.me_lead1m / r.me:>10.3f}" if pd.notna(r.me_lead1m) else ""
+            print(f"  {side:<9} {r.id:>7} {str(r.eom)[:10]:<10} {r.ret_exc_lead1m:>15,.4f} {r.me:>12,.1f} {nxt}")
+
+    header = f"  {'':9} {'id':>7} {'eom':<10} {'ret_exc_lead1m':>15} {'me':>12} {'me_next':>12} {'me_next/me':>10}"
+    print(f"\nSuspect returns (ret_exc_lead1m <= -0.90 and me_next >= 50% of me), set to missing: {len(flagged):,}"
+          f"\n(me in USD million; me_next = the stock's me in month t+1; original values shown)")
+    print(header)
+    show(flagged, "suspect")
+
+    ret = df[["id", "eom", "me", "me_lead1m", "ret_exc_lead1m"]]
+    print(f"\nExtreme ret_exc_lead1m in the universe after removing suspect returns "
+          f"(me_next blank if the stock is absent in t+1):")
+    print(header)
+    show(ret.nlargest(20, "ret_exc_lead1m"), "largest")
+    show(ret.nsmallest(20, "ret_exc_lead1m"), "smallest")
 
     print(f"\nMissing characteristics before ranking: {miss_share.mean():.1%} of all values")
     print("Most missing: " + ", ".join(f"{c} {s:.1%}" for c, s in miss_share.nlargest(10).items()))
