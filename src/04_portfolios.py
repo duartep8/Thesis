@@ -4,7 +4,7 @@ Usage:
     python src/04_portfolios.py --signal FILE --column COL --name NAME [--start 1990] [--end 2025]
                                 [--missing-return 0] [--missing-scope all|distressed]
     python src/04_portfolios.py --sanity
-    common options: [--panel data/panel.parquet] [--clean data/clean.parquet] [--out-dir data/portfolios]
+    common options: [--panel data/panel.parquet] [--clean data/clean.parquet] [--out-dir results/portfolios]
 
 Other scripts load this file with importlib (its name starts with a digit) and call
 portfolio(signal, panel) and summary(monthly, start, end); load_panel(panel, clean) adds
@@ -200,7 +200,7 @@ def main():
     parser.add_argument("--sanity", action="store_true", help="momentum and random-signal checks")
     parser.add_argument("--panel", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--clean", default=str(ROOT / "data" / "clean.parquet"), help="unranked ret_12_1 for --sanity")
-    parser.add_argument("--out-dir", default=str(ROOT / "data" / "portfolios"))
+    parser.add_argument("--out-dir", default=str(ROOT / "results" / "portfolios"))
     args = parser.parse_args()
     t0 = time.time()
     out_dir = Path(args.out_dir)

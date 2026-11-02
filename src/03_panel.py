@@ -2,11 +2,11 @@
 
 Usage:
     python src/03_panel.py [--input data/clean.parquet] [--out data/panel.parquet] [--universe 1000]
-                           [--start-year 1975] [--reports data/reports]
+                           [--start 1974-12] [--reports data/reports]
 
 Steps, each using only the month-t cross-section (no look-ahead):
-  1. universe: from January of the start year (1975), the 1,000 largest stocks by me in each
-     month (ties broken by id); rows with a missing ret_exc_lead1m stay in (they are
+  1. universe: from the start month (December 1974, so the first return predicted is
+     January 1975), the 1,000 largest stocks by me in each month (ties broken by id); rows with a missing ret_exc_lead1m stay in (they are
      dropped only at training)
   1b. suspect returns: ret_exc_lead1m <= -0.90 while the stock's me in t+1 is at least 50%
      of its me in t (a near-total loss that the market value does not show). The original
@@ -51,7 +51,8 @@ def main():
     parser.add_argument("--input", default=str(ROOT / "data" / "clean.parquet"))
     parser.add_argument("--out", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--universe", type=int, default=1000, help="largest stocks by me per month (default 1000)")
-    parser.add_argument("--start-year", type=int, default=1975, help="first year of the panel (default 1975)")
+    parser.add_argument("--start", default="1974-12", help="first month of the panel, YYYY-MM (default 1974-12: "
+                        "the first return predicted is January 1975)")
     parser.add_argument("--reports", default=str(ROOT / "data" / "reports"), help="folder for coverage_by_decade.csv")
     args = parser.parse_args()
     t0 = time.time()
@@ -68,7 +69,7 @@ def main():
 
     # 1. Universe
     n_in = con.execute(f"SELECT count(*) FROM {src}").fetchone()[0]
-    start = f"DATE '{args.start_year}-01-01'"
+    start = f"DATE '{args.start}-01'"
     n_from_start = con.execute(f"SELECT count(*) FROM {src} WHERE eom >= {start}").fetchone()[0]
     available = con.execute(f"SELECT eom, count(*) AS n FROM {src} WHERE eom >= {start} "
                             "GROUP BY eom").df().set_index("eom")["n"]
@@ -145,7 +146,7 @@ def main():
     tmp_out.replace(out)
 
     # Report
-    print(f"Input: {args.input} ({n_in:,} rows; from {args.start_year}: {n_from_start:,} rows, {len(available)} months)")
+    print(f"Input: {args.input} ({n_in:,} rows; from {args.start}: {n_from_start:,} rows, {len(available)} months)")
     print(f"Universe: {N:,} largest by me per month -> {len(df):,} rows, "
           f"{months.index.min().date()} to {months.index.max().date()}")
     print(f"Months with fewer than {N:,} stocks: {len(short)}"

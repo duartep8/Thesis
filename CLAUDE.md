@@ -12,20 +12,26 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Models: elastic net, boosted trees (LightGBM), small neural network (1–2 seeds).
 - Part 1: for each model, a grid of window × training frequency.
   - Windows: rolling 5, 10 and 15 years of training + validation, plus expanding
-    (from January 1975, the start of the data).
+    (from January 1975, the start of the data). Windows are defined by the month of
+    the return predicted; a model built in December Y−1 uses returns up to December Y−1.
   - Frequency: trained once (fit on data up to the year before the test period,
     then kept unchanged) or retrained every year.
-  - The data start in January 1975. The longest window (15 years) sets the first
-    test year: 1990. Test period: 1990–2025.
+  - Returns start in January 1975 (the panel starts with the December 1974
+    cross-section). The longest window (15 years) sets the first test year: 1990.
+    Test period: return months 1990–2025.
+  - Trained once, the 15-year and expanding windows are the same December 1989 fit;
+    report them side by side, marked as identical.
   - All setups predict the same test period, so R² and Sharpe ratios are comparable.
   - Report the full grid; never pick a best window using test data.
-- Training/validation split inside each window: a baseline split, plus a few
-  variations as a sensitivity check.
+- Training/validation split inside each window: validation = the last 30% of the
+  window's months (baseline), 25% and 35% as variations, rounded to whole months.
+  The model is fit on the training part only.
 - Hyperparameters: Part 1, tuned separately for each window setup (at its first fit).
   Part 2, tuned once and then fixed.
 - Part 2 (A vs C, value of retraining): for all three models, in the expanding,
-  yearly-retrained setup, over the same months. C = this December's refit on all
-  data so far; A = last December's model, unchanged. No extra fits needed.
+  yearly-retrained setup, over return months 1991–2025. C = this December's refit on
+  all data so far; A = last December's model, unchanged. No extra fits needed: each
+  yearly model also predicts the year after its test year (saved with age = 1).
 - Measures: out-of-sample R² (Gu, Kelly & Xiu, no demeaning) and, mainly, the
   Sharpe ratio of the decile long–short portfolio; alphas against
   Fama–French 5 (+ momentum).
@@ -41,18 +47,28 @@ how training choices and retraining affect forecasts and portfolio performance.
 ## Data
 - `data/` holds the JKP Global Factor Data from WRDS (licensed):
   never commit it, never copy it outside `data/`, never print large extracts.
+  Model outputs that carry PERMNOs go only to the ignored `results/` folders below.
 - Work with parquet; read big files in chunks or by columns.
 - `data/raw_parquet/`: the raw WRDS download (global, 1960–2025) as verified parquet
   (`00_csv_to_parquet.py`).
 - `data/test_sample.parquet`: the 200 largest stocks each month, for quick tests.
 
+## Folder layout
+- `data/`: the licensed data and everything derived from it row by row (clean,
+  panel, test sample, raw parquet, logs in `data/reports/`). Never committed.
+- `results/predictions/`, `results/models/`, `results/portfolios/`: model outputs.
+  They contain PERMNOs, so they are never committed (in `.gitignore`).
+- `results/tables/`: summary tables such as `05_enet_summary.csv`. Aggregates only;
+  committed.
+
 ## Data decisions
 - Source: JKP Global Factor Data (WRDS), US only (`01_clean.py` keeps `excntry = 'USA'`),
   common stocks, main exchange, one security per firm, CRSP stocks only
   (`source_crsp = 1`), so `id` = PERMNO.
-- Sample: January 1975 to December 2025; earlier months are dropped
-  (`03_panel.py --start-year`, default 1975). Chosen from characteristic coverage:
-  in the universe, the mean missing share is 47% in 1960, 15% in 1975, about 11% from 1977.
+- Sample: return months January 1975 to December 2025; the panel starts with the
+  December 1974 cross-section (`03_panel.py --start`, default 1974-12). Chosen from
+  characteristic coverage: in the universe, the mean missing share is 47% in 1960,
+  15% in 1975, about 11% from 1977.
 - Drop rows with missing `me` (rare). Keep rows with a missing `ret_exc_lead1m`
   (dropped only at training) to avoid look-ahead. In 1975–2025 these are 0.35% of the
   panel and almost all are a stock's last month in the data: our JKP file has no

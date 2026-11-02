@@ -227,3 +227,8 @@ data/
 # Saved models and large outputs
 models/
 predictions/
+
+# Model outputs with PERMNOs (never commit); results/tables/ holds aggregates and is committed
+results/predictions/
+results/models/
+results/portfolios/
