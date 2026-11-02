@@ -1,0 +1,3 @@
+window,val_share,chosen_alpha,chosen_l1_ratio,chosen_val_r2,chosen_n_nonzero,ours_alpha,ours_l1_ratio,ours_val_r2,same_choice,max_grid_alpha_rel_diff,max_grid_val_r2_abs_diff,same_nonzero_share,same_rank_share,gap_best_to_second
+10y,0.3,0.0063291784,0.1,0.0085683737,15,0.00632918,0.1,0.00856837,True,3.8277119e-06,8.452256e-08,1,1,2.4123645e-06
+expanding,0.3,0.0070757866,0.1,0.010353484,15,0.00707579,0.1,0.0103535,True,3.473012e-06,4.899402e-08,1,1,8.0172887e-06

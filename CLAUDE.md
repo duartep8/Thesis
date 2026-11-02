@@ -79,7 +79,8 @@ how training choices and retraining affect forecasts and portfolio performance.
 - `results/predictions/`, `results/models/`, `results/portfolios/`: model outputs.
   They contain PERMNOs, so they are never committed (in `.gitignore`).
 - `results/tables/`: summary tables such as `05_enet_summary.csv`. Aggregates only;
-  committed.
+  committed. Figures in `results/tables/figures/`; notes such as
+  `results/tables/notes_comparison.md` (our results against the literature).
 
 ## Data decisions
 - Source: JKP Global Factor Data (WRDS), US only (`01_clean.py` keeps `excntry = 'USA'`),
