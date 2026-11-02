@@ -40,6 +40,13 @@ marked and not tested.
 Alphas: long-short returns (gross and net) on Mkt-RF, SMB, HML, RMW, CMA and Mom, OLS
 with Newey-West standard errors (6 lags).
 
+Missing returns: our JKP file has no delisting returns, so every result is labelled
+provisional, pending delisting returns (04_portfolios.RESULT_STATUS). Next to the baseline
+(a held stock with a missing return counts as 0), two sensitivities rebuild each setup's
+portfolio from its saved predictions with held missing returns at -30% for all stocks, or
+for distressed stocks only (04_portfolios.py); the weights do not change. For each:
+gross and net Sharpe ratio, alphas and the yearly-vs-once tests.
+
 Validation-share diagnostics: chosen settings and model size per setup; for each pair of
 shares within a window and frequency, the average monthly Pearson and Spearman correlation
 of predictions, the overlap of the long and short sides and the correlation of long-short
@@ -47,8 +54,9 @@ returns. If 05_train.py --cross-fit was run, a's training part with b's settings
 separates training data from tuning: correlations at equal settings or equal data, and the
 Sharpe difference split both ways (tuning + data).
 
-Outputs: results/tables/06_<model>_{summary,sharpe_tests,alphas,valshare_diag,crossfit}.csv
-(aggregates only); monthly net returns in results/portfolios/<model>_<setup>_<freq>_net.parquet
+Outputs: results/tables/06_<model>_{summary,sharpe_tests,alphas,valshare_diag,crossfit,
+missing_sensitivity}.csv (aggregates only); monthly net returns in
+results/portfolios/<model>_<setup>_<freq>[_m30_all|_m30_distressed]_net.parquet
 and cross-fit portfolios in results/portfolios/diagnostic/ (not committed).
 """
 
@@ -84,6 +92,9 @@ VAL_PAIRS = [(0.25, 0.30), (0.30, 0.35), (0.25, 0.35)]
 REFERENCE = ("expanding", "yearly", 0.30)
 SIZE_COLUMN = {"enet": "n_nonzero"}  # model size logged by 05_train.py in 05_<model>_fits.csv
 COST_LABEL = "net = after half-spread costs from bidaskhl_21d, an upper bound on costs"
+# Held missing returns: (label, value, scope) for 04_portfolios.portfolio; the first is the baseline
+MISSING_VERSIONS = [("baseline", 0.0, "all"), ("m30_all", -0.30, "all"), ("m30_distressed", -0.30, "distressed")]
+MISSING_LABELS = {"baseline": "0 (baseline)", "m30_all": "-30%, all", "m30_distressed": "-30%, distressed only"}
 
 
 def check(ok, message):
@@ -444,7 +455,7 @@ def main():
     clean_spread["eom"] = pd.to_datetime(clean_spread["eom"])
 
     # Costs and net returns
-    series, holds, fill_counts = {}, {}, {}
+    series, holds, fill_counts, missing = {}, {}, {}, {}
     for s in setups:
         name = stem(model, *s)
         monthly = pd.read_parquet(pf_dir / f"{name}_monthly.parquet")
@@ -454,6 +465,28 @@ def main():
         net = net_returns(monthly, hold, spread)
         net.to_parquet(pf_dir / f"{name}_net.parquet")
         series[s], holds[s] = net, hold
+        missing[("baseline", s)] = (int(monthly["n_missing_ret"].sum()), int(monthly["n_missing_filled"].sum()))
+
+    # Missing-return sensitivities: the same portfolios rebuilt with held missing returns at -30%
+    sens = {"baseline": series}
+    for version, value, scope in MISSING_VERSIONS[1:]:
+        sens[version] = {}
+    for s in setups:
+        sig = predictions(res / "predictions" / model / f"{s[0]}_val{round(s[2] * 100)}.parquet", s[1])
+        for version, value, scope in MISSING_VERSIONS[1:]:
+            monthly, hold = p04.portfolio(sig, pf_panel, missing_return=value, missing_scope=scope)
+            base = holds[s]
+            check(len(hold) == len(base) and (hold["id"].to_numpy() == base["id"].to_numpy()).all()
+                  and (hold["eom"].to_numpy().astype("datetime64[ns]") == base["eom"].to_numpy().astype("datetime64[ns]")).all()
+                  and np.allclose(hold["weight"].to_numpy(), base["weight"].to_numpy(), rtol=0, atol=1e-12),
+                  f"{s} {version}: weights differ from the baseline portfolio")
+            spread, _ = fill_spread(hold, panel_spread, clean_spread)
+            net = net_returns(monthly, hold, spread)
+            net.to_parquet(pf_dir / f"{stem(model, *s)}_{version}_net.parquet")
+            sens[version][s] = net
+            missing[(version, s)] = (int(monthly["n_missing_ret"].sum()), int(monthly["n_missing_filled"].sum()))
+    print(f"Missing-return sensitivities rebuilt for {len(setups)} setups x {len(MISSING_VERSIONS) - 1} versions "
+          "(weights identical to the baseline)")
     months = series[setups[0]].index
     check(all(series[s].index.equals(months) for s in setups), "setups cover different months")
     c = pd.DataFrame(fill_counts).T.sum()
@@ -489,11 +522,12 @@ def main():
     # Sharpe ratio tests
     tests = []
 
-    def add_test(group, a, b):
+    def add_test(group, a, b, version="baseline"):
         for kind in ("gross", "net"):
-            ra, rb = series[a][kind].to_numpy(), series[b][kind].to_numpy()
+            ra, rb = sens[version][a][kind].to_numpy(), sens[version][b][kind].to_numpy()
             t = lw_test(ra, rb)
-            tests.append({"group": group, "returns": kind, "a_window": a[0], "a_freq": a[1], "a_val": a[2],
+            tests.append({"group": group, "missing_version": version, "returns": kind,
+                          "a_window": a[0], "a_freq": a[1], "a_val": a[2],
                           "b_window": b[0], "b_freq": b[1], "b_val": b[2], "sharpe_a": sharpe(ra), "sharpe_b": sharpe(rb),
                           "diff": sharpe(ra) - sharpe(rb), "delta_lw_ann": t["delta_m"] * np.sqrt(12),
                           "se_lw_ann": t["se_m"] * np.sqrt(12), "p_boot": t["p_boot"], "p_hac": t["p_hac"],
@@ -503,7 +537,8 @@ def main():
     for w in WINDOW_ORDER:
         for v in sorted(s05["val_share"].unique()):
             if (w, "yearly", v) in have and (w, "once", v) in have:
-                add_test("yearly_vs_once", (w, "yearly", v), (w, "once", v))
+                for version, _, _ in MISSING_VERSIONS:
+                    add_test("yearly_vs_once", (w, "yearly", v), (w, "once", v), version)
     for w in WINDOW_ORDER:
         for f in FREQS:
             for va, vb in VAL_PAIRS:
@@ -515,7 +550,7 @@ def main():
                 add_test("vs_reference", s, REFERENCE)
     tests = pd.DataFrame(tests)
     tests["p_holm"] = np.nan
-    for (g, kind), idx in tests[~tests["identical"]].groupby(["group", "returns"]).groups.items():
+    for _, idx in tests[~tests["identical"]].groupby(["group", "returns", "missing_version"]).groups.items():
         tests.loc[idx, "p_holm"] = multipletests(tests.loc[idx, "p_boot"], method="holm")[1]
     tests["note"] = np.where(tests["identical"], "identical return series; not tested", "")
 
@@ -529,7 +564,7 @@ def main():
                                     series[o]["gross"].to_numpy(), series[o]["cost_total"].to_numpy())
                 summary.loc[[y, o], "breakeven_k_equal"] = k
     for kind in ("gross", "net"):
-        t = tests[tests["returns"] == kind]
+        t = tests[(tests["returns"] == kind) & (tests["missing_version"] == "baseline")]
         yo = t[t["group"] == "yearly_vs_once"]
         for r in yo.itertuples():
             summary.loc[[(r.a_window, r.a_freq, r.a_val), (r.b_window, r.b_freq, r.b_val)], f"p_yearly_vs_once_{kind}"] = r.p_boot
@@ -546,6 +581,27 @@ def main():
         summary.loc[REFERENCE, "note"] = (summary.loc[REFERENCE, "note"] + " reference").strip()
     summary["cost_measure"] = "bidaskhl_21d half-spread: upper bound on costs"
     summary = summary.reset_index()
+
+    # Sensitivity table: every setup under each missing-return version
+    sens_rows = []
+    for version, value, scope in MISSING_VERSIONS:
+        yo = tests[(tests["group"] == "yearly_vs_once") & (tests["missing_version"] == version)]
+        for s in setups:
+            d = sens[version][s]
+            r = {"window": s[0], "freq": s[1], "val_share": s[2], "missing_version": version,
+                 "missing_return": MISSING_LABELS[version], "held_missing": missing[(version, s)][0],
+                 "filled_with_m30": missing[(version, s)][1], "gross_mean": d["gross"].mean(),
+                 "gross_sharpe": sharpe(d["gross"]), "net_mean": d["net"].mean(), "net_sharpe": sharpe(d["net"]),
+                 "cost_mean": d["cost_total"].mean()}
+            for kind in ("gross", "net"):
+                a = alpha_reg(d[kind], ff)
+                r.update({f"alpha_{kind}_m": a["alpha_m"], f"alpha_{kind}_t": a["alpha_t"]})
+                pair = yo[(yo["returns"] == kind) & (yo["a_window"] == s[0]) & (yo["a_val"] == s[2])]
+                if len(pair):
+                    r[f"yearly_minus_once_{kind}"] = pair["diff"].iloc[0]
+                    r[f"p_yearly_vs_once_{kind}"] = pair["p_boot"].iloc[0]
+            sens_rows.append(r)
+    sensitivity = pd.DataFrame(sens_rows)
 
     # Validation-share diagnostics
     fits = pd.read_csv(tables / f"05_{model}_fits.csv")
@@ -613,7 +669,11 @@ def main():
                     "path2_data_at_a_settings": sr["aa"] - sr["ba"], "path2_tuning_on_b_data": sr["ba"] - sr["bb"]})
     cross = pd.DataFrame(cross_rows)
 
-    # Save
+    # Save (every table carries the provisional label)
+    for t in (summary, tests, alphas, diag, cross, sensitivity):
+        if len(t):
+            t.insert(0, "status", p04.RESULT_STATUS)
+    sensitivity.to_csv(tables / f"06_{model}_missing_sensitivity.csv", index=False, float_format="%.6g")
     summary.to_csv(tables / f"06_{model}_summary.csv", index=False, float_format="%.6g")
     tests.to_csv(tables / f"06_{model}_sharpe_tests.csv", index=False, float_format="%.6g")
     alphas.to_csv(tables / f"06_{model}_alphas.csv", index=False, float_format="%.6g")
@@ -624,6 +684,7 @@ def main():
     # Report
     lab = lambda w, f, v: f"{w:<10}{f:<7}{v:>4.2f}"
     num = lambda x, spec, width: f"{'':>{width}}" if pd.isna(x) else f"{x:>{width}{spec}}"
+    print(f"\nAll results {p04.RESULT_STATUS.upper()}.")
     print(f"\nSummary, return months {months[0]:%Y-%m} to {months[-1]:%Y-%m}; long-short decile, capped value weights, "
           f"missing returns = 0\n  {COST_LABEL}. Alphas: FF5 + Mom, Newey-West {NW_LAGS} lags. p: LW bootstrap.")
     print(f"  {'window':<10}{'freq':<7}{'val':>4}{'SR gross':>9}{'SR net':>8}{'mean g':>8}{'mean n':>8}{'cost':>7}"
@@ -641,10 +702,33 @@ def main():
     print(f"  average cost per month: long side {summary['cost_long'].mean():.2%}, short side {summary['cost_short'].mean():.2%} "
           "(mean over setups)")
 
+    vs = ["baseline", "m30_all", "m30_distressed"]
+    piv = sensitivity.set_index(["window", "freq", "val_share", "missing_version"])
+    print("\nMissing-return sensitivity: held missing returns = 0 (baseline) | -30% all | -30% distressed only")
+    print(f"  {'window':<10}{'freq':<7}{'val':>4}{'held':>6}{'filled':>12}{'SR gross':>21}{'SR net':>22}"
+          f"{'alpha gross (t)':>36}{'alpha net (t)':>40}")
+    for s in setups:
+        g = [piv.loc[(*s, v)] for v in vs]
+        print(f"  {lab(*s)}{g[0]['held_missing']:>6}{g[1]['filled_with_m30']:>6}{g[2]['filled_with_m30']:>6}"
+              + "".join(f"{x['gross_sharpe']:>7.2f}" for x in g) + " "
+              + "".join(f"{x['net_sharpe']:>7.2f}" for x in g) + " "
+              + "".join(f"{x['alpha_gross_m']:>6.2%} ({x['alpha_gross_t']:>5.2f})" for x in g) + " "
+              + "".join(f"{x['alpha_net_m']:>6.2%} ({x['alpha_net_t']:>5.2f})" for x in g))
+    print("  held: held stock-months with a missing return; filled: of these, set to -30% (all | distressed)")
+    print("\nYearly vs once under each missing-return version: Sharpe difference (yearly - once), LW bootstrap p")
+    print(f"  {'window':<10}{'val':>5}" + "".join(f"{MISSING_LABELS[v]:>24}" for v in vs) + "   (gross | net)")
+    for (w, f, v) in [x for x in setups if x[1] == "yearly"]:
+        cells = []
+        for ver in vs:
+            x = piv.loc[(w, f, v, ver)]
+            cells.append(f"{x['yearly_minus_once_gross']:>+6.2f} {x['p_yearly_vs_once_gross']:.2f}|"
+                         f"{x['yearly_minus_once_net']:>+6.2f} {x['p_yearly_vs_once_net']:.2f}")
+        print(f"  {w:<10}{v:>5.2f}" + "".join(f"{c:>24}" for c in cells))
+
     for g, title in (("yearly_vs_once", "Yearly vs once"), ("val_shares", "Validation shares"),
                      ("vs_reference", "Each setup vs the reference (expanding, yearly, 0.30)")):
-        t = tests[tests["group"] == g]
-        print(f"\n{title}: Ledoit-Wolf, difference of annualized Sharpe ratios (A - B); p bootstrap / HAC / Holm")
+        t = tests[(tests["group"] == g) & (tests["missing_version"] == "baseline")]
+        print(f"\n{title} (missing returns = 0): Ledoit-Wolf, difference of annualized Sharpe ratios (A - B); p bootstrap / HAC / Holm")
         print(f"  {'A':<21}  {'B':<21}{'gross diff':>11}{'p boot':>7}{'p hac':>7}{'p holm':>7}"
               f"{'net diff':>11}{'p boot':>7}{'p hac':>7}{'p holm':>7}")
         for (key, grp) in t.groupby(["a_window", "a_freq", "a_val", "b_window", "b_freq", "b_val"], sort=False):

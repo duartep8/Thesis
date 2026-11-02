@@ -1,5 +1,7 @@
 # Comparison with the literature
 
+All our results are **provisional, pending delisting returns**.
+
 ## Elastic net vs Gu, Kelly & Xiu (2020), ENet+H
 
 Gross results of the decile long–short (H–L) portfolio. GKX: Tables 7–8, value-weighted.

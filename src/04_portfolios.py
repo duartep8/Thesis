@@ -45,6 +45,8 @@ ROOT = Path(__file__).resolve().parent.parent
 PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc", "ret_exc_lead1m", "ret_exc_lead1m_suspect", "bidaskhl_21d_raw"]
 FRAC = 0.10
 SEED = 42
+# Label for every performance result until CRSP delisting returns are added in 03_panel.py
+RESULT_STATUS = "provisional, pending delisting returns"
 PERIODS = [(1975, 1989), (1990, 2025)]
 # Missing-return versions: (label, value for a held stock with a missing return, scope)
 MISSING_VERSIONS = [("baseline: missing = 0", 0.0, "all"),

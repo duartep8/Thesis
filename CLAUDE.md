@@ -55,6 +55,14 @@ how training choices and retraining affect forecasts and portfolio performance.
     training part with each other share's settings (diagnostic only, no reported setup
     changes), to separate the training-data effect from the tuning effect.
 
+## Status of results
+- All performance results are **provisional, pending delisting returns** (our JKP file has
+  none; see "Still open"). Every 05/06 table carries this label (`04_portfolios.RESULT_STATUS`);
+  remove it only after the delisting returns are in `03_panel.py` and the models are rerun.
+- `06_evaluate.py` reports every setup under three treatments of held missing returns:
+  0 (baseline), −30% for all, and −30% for distressed stocks only (Sharpe ratios, alphas,
+  yearly-vs-once tests; `06_<model>_missing_sensitivity.csv`).
+
 ## Still open (do not assume)
 - Neural network size.
 - CRSP delisting returns: the delisting file (PERMNO, delisting date, delisting return,
@@ -113,4 +121,8 @@ how training choices and retraining affect forecasts and portfolio performance.
 - No look-ahead: a model may only use data available before the month it predicts.
 - Test every script on the test sample first, then run on the full data.
 - Fixed random seeds; save every set of predictions so nothing is refit.
+- Each predictions file has a manifest (panel hash, test years, characteristics, model and
+  tuning grid, seed, package versions, training-code hash; git commit recorded). 05 reuses
+  a file only if the manifest matches and every test month is covered; otherwise it stops,
+  and `--refit` refits and overwrites.
 - Commit after each working step with a clear message.
