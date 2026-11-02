@@ -2,11 +2,13 @@
 
 Usage:
     python src/04_portfolios.py --signal FILE --column COL --name NAME [--start 1990] [--end 2025]
+                                [--missing-return 0] [--missing-scope all|distressed]
     python src/04_portfolios.py --sanity
     common options: [--panel data/panel.parquet] [--clean data/clean.parquet] [--out-dir data/portfolios]
 
 Other scripts load this file with importlib (its name starts with a digit) and call
-portfolio(signal, panel) and summary(monthly, start, end).
+portfolio(signal, panel) and summary(monthly, start, end); load_panel(panel, clean) adds
+the distress flag used by the missing-return sensitivity.
 
 Each month t, using only month-t data:
   - eligible: universe stocks with a non-missing signal (a missing ret_exc_lead1m is not
@@ -17,8 +19,11 @@ Each month t, using only month-t data:
     = the smallest me among size_grp = 'mega' stocks that month; long +1, short -1
 Returns are realized from t to t+1 (ret_exc_lead1m): long = sum(w r) on the long side,
 short = the return of the short position = -sum(w r) on the short side, long-short =
-long + short. A held stock with a missing return counts as 0 and is logged. Months with
-no returns at all (the last month) are left out.
+long + short. A held stock with a missing return counts as 0 (baseline) and is logged.
+Sensitivity: it counts as missing_return (e.g. -0.30, Shumway 1997) instead, either for
+all missing returns or only for distressed stocks: ret_12_1 < -50% (unranked, from
+clean.parquet) or last-month ret_exc < -30%, both known at t. Months with no returns at
+all (the last month) are left out.
 Turnover per side = sum |w_t - w~_t-1| over stocks held in either month (buys and sells:
 a full replacement is 200%), where w~ = w (1 + r) / (1 + side return) is last month's
 weight after drift, renormalized to sum to 1 on each side (excess returns). Long-short
@@ -37,15 +42,24 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc_lead1m", "ret_exc_lead1m_suspect", "bidaskhl_21d_raw"]
+PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc", "ret_exc_lead1m", "ret_exc_lead1m_suspect", "bidaskhl_21d_raw"]
 FRAC = 0.10
 SEED = 42
 PERIODS = [(1975, 1989), (1990, 2025)]
+# Missing-return versions: (label, value for a held stock with a missing return, scope)
+MISSING_VERSIONS = [("baseline: missing = 0", 0.0, "all"),
+                    ("missing = -30%, all", -0.30, "all"),
+                    ("missing = -30%, distressed only", -0.30, "distressed")]
 
 
-def load_panel(path):
+def load_panel(path, clean):
+    """The panel columns used here, plus distressed: ret_12_1 < -50% (unranked) or ret_exc < -30%."""
     panel = pd.read_parquet(path, columns=PANEL_COLS)
-    panel["eom"] = pd.to_datetime(panel["eom"])
+    mom = pd.read_parquet(clean, columns=["id", "eom", "ret_12_1"]).rename(columns={"ret_12_1": "ret_12_1_raw"})
+    for df in (panel, mom):
+        df["eom"] = pd.to_datetime(df["eom"])
+    panel = panel.merge(mom, on=["id", "eom"], how="left")
+    panel["distressed"] = (panel["ret_12_1_raw"] < -0.5) | (panel["ret_exc"] < -0.3)
     return panel.sort_values(["eom", "id"], ignore_index=True)
 
 
@@ -54,8 +68,14 @@ def check(ok, message):
         raise AssertionError(message)
 
 
-def portfolio(signal, panel, frac=FRAC):
-    """signal: DataFrame with id, eom and one signal column. Returns (monthly, holdings)."""
+def portfolio(signal, panel, frac=FRAC, missing_return=0.0, missing_scope="all"):
+    """signal: DataFrame with id, eom and one signal column. Returns (monthly, holdings).
+
+    A held stock with a missing return counts as missing_return if missing_scope is 'all',
+    or if it is 'distressed' and the stock is distressed; otherwise as 0.
+    """
+    if missing_scope not in ("all", "distressed"):
+        raise ValueError("missing_scope must be 'all' or 'distressed'")
     cols = [c for c in signal.columns if c not in ("id", "eom")]
     if len(cols) != 1:
         raise ValueError(f"signal needs id, eom and exactly one signal column, got {list(signal.columns)}")
@@ -84,7 +104,8 @@ def portfolio(signal, panel, frac=FRAC):
     by_side = h.groupby(["eom", "side"])
     h["a"] = h["capped"] / by_side["capped"].transform("sum")
     h["ret_missing"] = h["ret_exc_lead1m"].isna()
-    h["r"] = h["ret_exc_lead1m"].fillna(0.0)
+    fill = h["ret_missing"] & (h["distressed"] if missing_scope == "distressed" else True)
+    h["r"] = h["ret_exc_lead1m"].fillna(0.0).where(~fill, missing_return)
     h["side_ret"] = (h["a"] * h["r"]).groupby([h["eom"], h["side"]]).transform("sum")
     h["a_drift"] = h["a"] * (1 + h["r"]) / (1 + h["side_ret"])
 
@@ -111,11 +132,13 @@ def portfolio(signal, panel, frac=FRAC):
     monthly["turnover_long"], monthly["turnover_short"] = turnover["long"], turnover["short"]
     monthly["turnover"] = monthly["turnover_long"] + monthly["turnover_short"]
     monthly["n_missing_ret"] = h.groupby("eom")["ret_missing"].sum()
+    monthly["n_missing_filled"] = fill.groupby(h["eom"]).sum() if missing_return != 0 else 0
     monthly.index.name = "eom"
 
     # Holdings with signed weights, plus rows for stocks sold out of the portfolio
     sign = np.where(h["side"] == "long", 1.0, -1.0)
-    cur = h[["id", "eom", "side", "ret_exc_lead1m", "ret_missing", "ret_exc_lead1m_suspect"]].assign(weight=sign * h["a"])
+    cur = h[["id", "eom", "side", "ret_exc_lead1m", "ret_missing", "ret_exc_lead1m_suspect", "distressed", "r"]].rename(
+        columns={"r": "ret_used"}).assign(weight=sign * h["a"])
     prv = pd.DataFrame({"id": h["id"], "eom": h["eom"] + pd.offsets.MonthEnd(1), "weight_prev": sign * h["a_drift"]})
     hold = cur.merge(prv, on=["id", "eom"], how="outer")
     hold = hold[hold["eom"].isin(months)].merge(panel[["id", "eom", "me", "bidaskhl_21d_raw"]], on=["id", "eom"], how="left")
@@ -149,15 +172,18 @@ def report(name, monthly, start=None, end=None):
         print(f"  {c:<11}{r['mean']:>11.2%}{r['sd']:>10.2%}{r['sharpe']:>15.2f}{r['t']:>8.2f}")
     print(f"  turnover/month (buys + sells): long {m['turnover_long'].mean():.0%}, short {m['turnover_short'].mean():.0%}, "
           f"long-short {m['turnover'].mean():.0%}; stocks per side {m['n_long'].mean():.0f}")
+    filled = int(m["n_missing_filled"].sum())
     print(f"  long-short positive in {(yearly > 0).sum()} of {len(yearly)} years; "
-          f"held stocks with a missing return (counted as 0): {int(m['n_missing_ret'].sum()):,}")
+          f"held stocks with a missing return: {int(m['n_missing_ret'].sum()):,}"
+          + (f", of which {filled:,} set to the sensitivity value, the rest 0" if filled else " (counted as 0)"))
 
 
 def save(out_dir, name, monthly, hold):
     out_dir.mkdir(parents=True, exist_ok=True)
     monthly.to_parquet(out_dir / f"{name}_monthly.parquet")
     hold.to_parquet(out_dir / f"{name}_holdings.parquet", index=False)
-    missing = hold.loc[hold["ret_missing"].fillna(False).astype(bool), ["id", "eom", "side", "weight", "ret_exc_lead1m_suspect"]]
+    missing = hold.loc[hold["ret_missing"].fillna(False).astype(bool),
+                       ["id", "eom", "side", "weight", "ret_exc_lead1m_suspect", "distressed", "ret_used"]]
     missing.to_csv(out_dir / f"{name}_missing_returns.csv", index=False)
     print(f"Saved {name}: monthly, holdings, and {len(missing):,} missing returns to {out_dir}/{name}_missing_returns.csv")
 
@@ -169,6 +195,8 @@ def main():
     parser.add_argument("--name", help="name for the output files")
     parser.add_argument("--start", type=int, help="first formation year in the report")
     parser.add_argument("--end", type=int, help="last formation year in the report")
+    parser.add_argument("--missing-return", type=float, default=0.0, help="value for a held missing return (default 0)")
+    parser.add_argument("--missing-scope", choices=["all", "distressed"], default="all")
     parser.add_argument("--sanity", action="store_true", help="momentum and random-signal checks")
     parser.add_argument("--panel", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--clean", default=str(ROOT / "data" / "clean.parquet"), help="unranked ret_12_1 for --sanity")
@@ -176,22 +204,26 @@ def main():
     args = parser.parse_args()
     t0 = time.time()
     out_dir = Path(args.out_dir)
-    panel = load_panel(args.panel)
+    panel = load_panel(args.panel, args.clean)
 
     if args.sanity:
         mom = pd.read_parquet(args.clean, columns=["id", "eom", "ret_12_1"])
         rng = np.random.default_rng(SEED)
         rnd = panel[["id", "eom"]].assign(random=rng.standard_normal(len(panel)))
-        for name, sig in [("sanity_momentum", mom), ("sanity_random", rnd)]:
-            monthly, hold = portfolio(sig, panel)
+        for (label, value, scope), suffix in zip(MISSING_VERSIONS, ["", "_m30_all", "_m30_distressed"]):
+            monthly, hold = portfolio(mom, panel, missing_return=value, missing_scope=scope)
             for start, end in PERIODS:
-                report(name, monthly, start, end)
-            save(out_dir, name, monthly, hold)
+                report(f"sanity_momentum ({label})", monthly, start, end)
+            save(out_dir, "sanity_momentum" + suffix, monthly, hold)
+        monthly, hold = portfolio(rnd, panel)
+        for start, end in PERIODS:
+            report("sanity_random", monthly, start, end)
+        save(out_dir, "sanity_random", monthly, hold)
     else:
         if not (args.signal and args.column and args.name):
             sys.exit("Give --signal, --column and --name, or --sanity")
         sig = pd.read_parquet(args.signal, columns=["id", "eom", args.column])
-        monthly, hold = portfolio(sig, panel)
+        monthly, hold = portfolio(sig, panel, missing_return=args.missing_return, missing_scope=args.missing_scope)
         report(args.name, monthly, args.start, args.end)
         save(out_dir, args.name, monthly, hold)
     print(f"\nDone in {time.time() - t0:,.1f}s")
