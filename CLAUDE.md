@@ -35,7 +35,25 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Measures: out-of-sample R² (Gu, Kelly & Xiu, no demeaning) and, mainly, the
   Sharpe ratio of the decile long–short portfolio; alphas against
   Fama–French 5 (+ momentum).
-- Trading costs: likely in the thesis; keep the code ready for them.
+- Evaluation (`06_evaluate.py`, any model; reads saved outputs, never refits):
+  - Window, frequency and validation share are all part of the comparison: report
+    every combination equally; never pick a best setup on test years; don't change
+    model settings based on these results.
+  - Sharpe ratio tests: Ledoit & Wolf (2008), studentized circular block bootstrap
+    (block 5, 5,000 draws, seed 42) as the main p-value, HAC (prewhitened QS) alongside,
+    Holm within each group. Groups: yearly vs once (each window × share); the three
+    shares against each other (each window × frequency); each setup against the
+    reference expanding, yearly, 30% (fixed in advance as the main design).
+  - Alphas: FF5 + momentum, Newey–West 6 lags; gross and net.
+  - Trading costs: cost = Σ |trade| × bidaskhl_21d / 2, the first month pays for the
+    initial purchase. No intraday spreads, so bidaskhl_21d stays; it overstates large
+    stocks' spreads (Chen & Velikov: 25–50 bp too high after 2003), so every net result
+    is labelled an upper bound on costs. Break-evens: the cost multiple at which the net
+    Sharpe ratio is zero, and at which yearly and once have equal net Sharpe ratios.
+    Price impact comes later (add it to `COST_COMPONENTS`); no short-selling fees yet.
+  - Validation-share diagnostic: `05_train.py --cross-fit` refits each share's
+    training part with each other share's settings (diagnostic only, no reported setup
+    changes), to separate the training-data effect from the tuning effect.
 
 ## Still open (do not assume)
 - Neural network size.
@@ -52,6 +70,8 @@ how training choices and retraining affect forecasts and portfolio performance.
 - `data/raw_parquet/`: the raw WRDS download (global, 1960–2025) as verified parquet
   (`00_csv_to_parquet.py`).
 - `data/test_sample.parquet`: the 200 largest stocks each month, for quick tests.
+- `data/ff/`: Fama–French 5 factors (2x3) and momentum, monthly, from Kenneth French's
+  data library; versions (CRSP vintage, SHA-256) in `data/ff/README.txt`.
 
 ## Folder layout
 - `data/`: the licensed data and everything derived from it row by row (clean,

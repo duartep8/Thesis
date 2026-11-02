@@ -2,7 +2,7 @@
 
 Usage:
     python src/05_train.py --model enet [--windows 5 10 15 expanding] [--val 0.30 0.25 0.35]
-                           [--test-start 1990] [--test-end 2025]
+                           [--test-start 1990] [--test-end 2025] [--cross-fit]
                            [--panel data/panel.parquet] [--clean data/clean.parquet] [--out results]
 
 Inputs: the 153 ranked characteristics; target: ret_exc_lead1m. Every row is labelled by
@@ -29,6 +29,13 @@ network to MODELS. Outputs (an existing predictions file is not refit, only eval
   results/tables/05_<model>_{summary,tuning,fits}.csv      aggregates only
 The report covers return months Y_start to Y_end: out-of-sample R^2, average monthly
 rank IC, and the long-short portfolio from 04_portfolios.py (missing returns = 0).
+
+--cross-fit (diagnostic only, after the grid): for each window and each pair of validation
+shares (a, b), refit every build on a's training part with b's tuned settings (from
+05_<model>_summary.csv). This separates the effect of less training data from that of
+different tuning; no reported setup changes. 06_evaluate.py evaluates these:
+  results/predictions/<model>/diagnostic/<window>_val<a>_set<b>.parquet
+  results/models/<model>/diagnostic/, results/tables/05_<model>_crossfit_fits.csv
 """
 
 import argparse
@@ -123,11 +130,15 @@ def month_index(dates):
     return (dates.dt.year * 12 + dates.dt.month - 1).to_numpy()
 
 
-def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, tuning_log):
-    """Fit one (window, validation share) over all build years; returns its predictions."""
+def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, tuning_log, fixed_settings=None, tag=""):
+    """Fit one (window, validation share) over all build years; returns its predictions.
+
+    fixed_settings: use these settings instead of tuning (diagnostic refits, saved with tag).
+    """
     X, y, has_y, m_idx, ret_year, first_idx = (data[k] for k in ("X", "y", "has_y", "m_idx", "ret_year", "first_idx"))
-    name = setup_name(window, val)
-    settings, parts = None, []
+    name = setup_name(window, val) + tag
+    model_dir = out / "models" / model.name / ("diagnostic" if fixed_settings is not None else "")
+    settings, parts = fixed_settings, []
     for b in builds:
         t0 = time.time()
         lo = first_idx if window == "expanding" else (b + 1 - int(window)) * 12
@@ -150,7 +161,7 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
         if key not in cache:
             cache[key] = model.fit(X[tr], y[tr], settings, SEED)
         fitted = cache[key]
-        model.save(fitted, out / "models" / model.name / f"{name}_{b}", data["chars"])
+        model.save(fitted, model_dir / f"{name}_{b}", data["chars"])
 
         pred = model.predict(fitted, X).astype("float32")
         settings_json = json.dumps(settings, sort_keys=True)
@@ -197,6 +208,40 @@ def evaluate(p04, pf_panel, preds, target, model_name, name, freq, out):
             "first_ret_month": p["ret_month"].min(), "last_ret_month": p["ret_month"].max()}
 
 
+def cross_fit(model, data, args, builds, out):
+    """Diagnostic refits: each validation share's training part with each other share's settings."""
+    summary = pd.read_csv(out / "tables" / f"05_{model.name}_summary.csv")
+    diag = out / "predictions" / model.name / "diagnostic"
+    diag.mkdir(parents=True, exist_ok=True)
+    (out / "models" / model.name / "diagnostic").mkdir(parents=True, exist_ok=True)
+    cache, fit_log = {}, []
+    for window in args.windows:
+        settings = {}
+        for val in args.val:
+            rows = summary[(summary["window"] == window_label(window)) & np.isclose(summary["val_share"], val)]
+            check(rows["settings"].nunique() == 1, f"no unique tuned settings for {setup_name(window, val)} in the summary")
+            settings[val] = json.loads(rows["settings"].iloc[0])
+        for val in args.val:
+            for other in args.val:
+                if other == val:
+                    continue
+                tag = f"_set{round(other * 100)}"
+                path = diag / f"{setup_name(window, val)}{tag}.parquet"
+                if path.exists():
+                    print(f"{path.name}: exists, skipped")
+                    continue
+                print(f"{setup_name(window, val)}{tag}: training part of {val:.0%}, settings tuned with {other:.0%}", flush=True)
+                n_log = len(fit_log)
+                preds = run_setup(model, data, window, val, builds, args.test_end, out, cache, fit_log, [],
+                                  fixed_settings=settings[other], tag=tag)
+                for row in fit_log[n_log:]:
+                    row["settings_from"] = other
+                preds["settings_from"] = other
+                preds.to_parquet(path, index=False)
+    if fit_log:
+        pd.DataFrame(fit_log).to_csv(out / "tables" / f"05_{model.name}_crossfit_fits.csv", index=False, float_format="%.6g")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", choices=list(MODELS), default="enet")
@@ -207,6 +252,7 @@ def main():
     parser.add_argument("--panel", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--clean", default=str(ROOT / "data" / "clean.parquet"), help="for the portfolio distress flag")
     parser.add_argument("--out", default=str(ROOT / "results"))
+    parser.add_argument("--cross-fit", action="store_true", help="diagnostic refits with another share's settings")
     args = parser.parse_args()
     t_start = time.time()
     model = MODELS[args.model]()
@@ -228,9 +274,13 @@ def main():
     print(f"Panel: {len(df):,} rows, return months {df['ret_month'].min():%Y-%m} to {df['ret_month'].max():%Y-%m}; "
           f"model {model.name}; test years {args.test_start}-{args.test_end}")
 
+    builds = list(range(args.test_start - 1, args.test_end))
+    if args.cross_fit:
+        cross_fit(model, data, args, builds, out)
+        print(f"Cross-fits done in {time.time() - t_start:,.0f}s")
+        return
     p04 = load_src("04_portfolios")
     pf_panel = p04.load_panel(args.panel, args.clean)
-    builds = list(range(args.test_start - 1, args.test_end))
     cache, fit_log, tuning_log, summary = {}, [], [], []
     once_preds = {}
     for window in args.windows:
