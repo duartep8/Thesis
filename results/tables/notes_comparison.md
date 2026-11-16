@@ -1,6 +1,8 @@
 # Comparison with the literature
 
-All our results are **provisional, pending delisting returns**.
+All our results are labelled **pending the MthDelFlg check**: they include CRSP delisting returns
+(the double count in our JKP vintage is removed by a pattern rule in `01_clean.py`), which is still to
+be checked against CRSP's `MthDelFlg`.
 
 ## Elastic net vs Gu, Kelly & Xiu (2020), ENet+H
 
@@ -13,8 +15,8 @@ training, refit every year). It is not a selected best setup.
 | | H–L mean / month | Sharpe (ann.) | FF5+Mom alpha / month | Turnover / month | OOS R² |
 |---|---|---|---|---|---|
 | GKX ENet+H (value-weighted) | 0.60% | 0.39 | −0.23% (n.s.) | 152% | 0.11% (all stocks) |
-| Ours, reference setup | 0.93% | 0.66 | 0.36% (t 1.92) | 230% | 0.52% |
-| Ours, range over 24 setups | 0.51–1.01% | 0.33–0.94 | 0.18–1.04% (t 1.0–4.4) | 195–281% | −0.61% to 0.52% |
+| Ours, reference setup | 0.95% | 0.68 | 0.38% (t 2.03) | 231% | 0.51% |
+| Ours, range over 24 setups | 0.51–1.03% | 0.33–0.97 | 0.18–1.07% (t 1.1–4.5) | 194–282% | −0.61% to 0.52% |
 
 Our elastic net earns a higher gross mean, Sharpe ratio and R² than GKX's ENet+H, has a
 positive rather than a negative alpha, and trades about 1.5 times as much. Five design
@@ -37,9 +39,10 @@ differences make the two not directly comparable:
   not identical: ours counts buys and sells on both sides, with drift renormalized within
   each side, so a full replacement of both sides is 400%. Check GKX's exact normalization
   before putting the two figures in one table.
-- **Factor exposure:** our setups trained once load heavily on profitability and value
-  (RMW 0.6–1.3, HML 0.5–0.7), and yearly setups load little on any factor. So our alphas
-  differ from GKX's for reasons of composition as well as skill.
+- **Factor exposure:** our setups trained once load heavily on profitability (RMW 0.6–1.3)
+  and, except for the 5-year window, on value (HML 0.45–0.7 for 10y, 15y and expanding;
+  about 0 for 5y). Yearly setups have smaller and mixed loadings (RMW −0.3 to 0.7, HML
+  −0.15 to 0.5). So our alphas differ from GKX's for reasons of composition as well as skill.
 
 Net of spread costs (an upper bound, `06_enet_summary.csv`), our Sharpe ratios fall to
-between −0.19 and 0.23; GKX report gross results only.
+between −0.19 and 0.24; GKX report gross results only.

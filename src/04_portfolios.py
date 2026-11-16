@@ -11,15 +11,21 @@ portfolio(signal, panel) and summary(monthly, start, end); load_panel(panel, cle
 the distress flag used by the missing-return sensitivity.
 
 Each month t, using only month-t data:
-  - eligible: universe stocks with a non-missing signal (a missing ret_exc_lead1m is not
-    known at t, so those stocks stay eligible)
+  - eligible: universe stocks with a non-missing signal that do not delist during month t
+    (delisted, from 01_clean.py: the delisting date is known at t and the stock no longer
+    trades at eom t; it stays in the universe and the characteristic ranks). Other missing
+    ret_exc_lead1m are not known at t, so those stocks stay eligible
   - sides: sorted by signal, ties broken by id; long the top k, short the bottom k,
     k = round(10% of eligible stocks)
   - weights: within each side proportional to min(me, cap), cap = the NYSE 80th percentile
     = the smallest me among size_grp = 'mega' stocks that month; long +1, short -1
 Returns are realized from t to t+1 (ret_exc_lead1m): long = sum(w r) on the long side,
 short = the return of the short position = -sum(w r) on the short side, long-short =
-long + short. A held stock with a missing return counts as 0 (baseline) and is logged.
+long + short. A stock held into its delisting month earns that month's return including
+the CRSP delisting return (01_clean.py) and is then closed at t: closed_by_delisting in the
+holdings (counted in turnover; 06 charges no spread on it, since the holder is paid out).
+A held stock with a still-missing return (suspect returns, trading halts without a CRSP
+delisting record, a few gaps) counts as 0 (baseline) and is logged.
 Sensitivity: it counts as missing_return (e.g. -0.30, Shumway 1997) instead, either for
 all missing returns or only for distressed stocks: ret_12_1 < -50% (unranked, from
 clean.parquet) or last-month ret_exc < -30%, both known at t. Months with no returns at
@@ -42,11 +48,12 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
-PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc", "ret_exc_lead1m", "ret_exc_lead1m_suspect", "bidaskhl_21d_raw"]
+PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc", "ret_exc_lead1m", "ret_exc_lead1m_suspect", "bidaskhl_21d_raw",
+              "delisted", "delist_fix"]
 FRAC = 0.10
 SEED = 42
-# Label for every performance result until CRSP delisting returns are added in 03_panel.py
-RESULT_STATUS = "provisional, pending delisting returns"
+# Label for every performance result until CRSP's MthDelFlg has checked the delisting fix in 01_clean.py
+RESULT_STATUS = "pending the MthDelFlg check"
 PERIODS = [(1975, 1989), (1990, 2025)]
 # Missing-return versions: (label, value for a held stock with a missing return, scope)
 MISSING_VERSIONS = [("baseline: missing = 0", 0.0, "all"),
@@ -90,6 +97,8 @@ def portfolio(signal, panel, frac=FRAC, missing_return=0.0, missing_scope="all")
     n_ret = panel.groupby("eom")["ret_exc_lead1m"].count()
     d = panel.merge(sig, on=["id", "eom"], how="inner")
     d = d[d["signal"].notna() & d["eom"].isin(n_ret.index[n_ret > 0])].join(cap, on="eom")
+    n_delisted = d.groupby("eom")["delisted"].sum()
+    d = d[~d["delisted"].astype(bool)]
     check(d["cap"].notna().all(), "a month has no mega stock, so no cap")
 
     # Sides: position in the month's sort by signal, ties broken by id
@@ -135,17 +144,22 @@ def portfolio(signal, panel, frac=FRAC, missing_return=0.0, missing_scope="all")
     monthly["turnover"] = monthly["turnover_long"] + monthly["turnover_short"]
     monthly["n_missing_ret"] = h.groupby("eom")["ret_missing"].sum()
     monthly["n_missing_filled"] = fill.groupby(h["eom"]).sum() if missing_return != 0 else 0
+    monthly["n_delisted_excluded"] = n_delisted.reindex(monthly.index).fillna(0).astype(int)
     monthly.index.name = "eom"
 
     # Holdings with signed weights, plus rows for stocks sold out of the portfolio
     sign = np.where(h["side"] == "long", 1.0, -1.0)
     cur = h[["id", "eom", "side", "ret_exc_lead1m", "ret_missing", "ret_exc_lead1m_suspect", "distressed", "r"]].rename(
         columns={"r": "ret_used"}).assign(weight=sign * h["a"])
-    prv = pd.DataFrame({"id": h["id"], "eom": h["eom"] + pd.offsets.MonthEnd(1), "weight_prev": sign * h["a_drift"]})
+    # closed_by_delisting: held at t-1, and month t (the target month of t-1) is the stock's delisting month
+    prv = pd.DataFrame({"id": h["id"], "eom": h["eom"] + pd.offsets.MonthEnd(1), "weight_prev": sign * h["a_drift"],
+                        "closed_by_delisting": h["delist_fix"].notna()})
     hold = cur.merge(prv, on=["id", "eom"], how="outer")
     hold = hold[hold["eom"].isin(months)].merge(panel[["id", "eom", "me", "bidaskhl_21d_raw"]], on=["id", "eom"], how="left")
     hold["weight"] = hold["weight"].fillna(0.0)
     hold["weight_prev"] = hold["weight_prev"].fillna(0.0)
+    hold["closed_by_delisting"] = hold["closed_by_delisting"].astype("boolean").fillna(False).astype(bool)
+    check((hold.loc[hold["closed_by_delisting"], "weight"] == 0).all(), "a stock is held in its delisting month")
     hold["trade"] = (hold["weight"] - hold["weight_prev"]).where(hold["eom"].isin(months[has_prev]))
     hold = hold.sort_values(["eom", "id"], ignore_index=True)
     return monthly, hold
@@ -178,6 +192,8 @@ def report(name, monthly, start=None, end=None):
     print(f"  long-short positive in {(yearly > 0).sum()} of {len(yearly)} years; "
           f"held stocks with a missing return: {int(m['n_missing_ret'].sum()):,}"
           + (f", of which {filled:,} set to the sensitivity value, the rest 0" if filled else " (counted as 0)"))
+    if "n_delisted_excluded" in m:
+        print(f"  left out because they delist during the formation month: {int(m['n_delisted_excluded'].sum()):,} stock-months")
 
 
 def save(out_dir, name, monthly, hold):

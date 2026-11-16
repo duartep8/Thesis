@@ -12,6 +12,8 @@ Steps, each using only the month-t cross-section (no look-ahead):
      of its me in t (a near-total loss that the market value does not show). The original
      is kept in ret_exc_lead1m_raw, ret_exc_lead1m_suspect flags the row, and
      ret_exc_lead1m is set to missing (dropped from training; 0 and logged in portfolios).
+     The rule runs on the target after 01's delisting fix; ret_exc_lead1m_raw is that
+     target before the rule, ret_exc_lead1m_jkp is JKP's original (before both).
      This touches only the target, which is month t+1 information anyway; me in t+1 is
      not kept in the panel.
   2. size_decile (1-10): me deciles within the universe each month
@@ -39,6 +41,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 CHARS_153_FILE = ROOT / "src" / "characteristics_153.txt"
 KEYS = ["id", "eom", "size_grp", "me", "ret_exc", "ret_exc_lead1m"]
+# From 01_clean.py's delisting step: JKP's original target, the fix flag on row t-1, and
+# whether the stock delists during month t (04 leaves those out of the month-t portfolios)
+DELIST = ["ret_exc_lead1m_jkp", "delist_fix", "delist_fix_how", "delisted"]
 LIQUIDITY = ["bidaskhl_21d", "dolvol_126d"]
 
 
@@ -63,7 +68,7 @@ def main():
     con.execute("SET memory_limit = '4GB'")
     src = f"read_parquet({sql_str(args.input)})"
     cols_in = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM {src}").fetchall()]
-    missing_cols = [c for c in KEYS + chars if c not in cols_in]
+    missing_cols = [c for c in KEYS + DELIST + chars if c not in cols_in]
     if missing_cols:
         sys.exit(f"{args.input} lacks {len(missing_cols)} columns, e.g. {missing_cols[:10]}")
 
@@ -73,7 +78,7 @@ def main():
     n_from_start = con.execute(f"SELECT count(*) FROM {src} WHERE eom >= {start}").fetchone()[0]
     available = con.execute(f"SELECT eom, count(*) AS n FROM {src} WHERE eom >= {start} "
                             "GROUP BY eom").df().set_index("eom")["n"]
-    select = ", ".join(f'u."{c}"' for c in KEYS + chars)
+    select = ", ".join(f'u."{c}"' for c in KEYS + DELIST + chars)
     # me_lead1m: the same stock's me at the next month end, if it is in the input (for step 1b only)
     df = con.execute(f"""
         SELECT {select}, n.me AS me_lead1m FROM (
@@ -137,7 +142,7 @@ def main():
 
     # Write
     extra = ["ret_exc_lead1m_raw", "ret_exc_lead1m_suspect", "size_decile"] + [f"{c}_raw" for c in LIQUIDITY] + [f"{c}_filled" for c in LIQUIDITY]
-    panel = df[KEYS + extra + chars]
+    panel = df[KEYS + DELIST + extra + chars]
     out = Path(args.out)
     tmp_out = out.with_suffix(".parquet.tmp")
     con.register("panel", panel)
@@ -153,6 +158,14 @@ def main():
           + (f" (min {short.min():,}, e.g. {[d.date().isoformat() for d in short.index[:3]]})" if len(short) else ""))
     print(f"Rows with missing ret_exc_lead1m (kept): {no_target:,} = {no_target_raw:,} missing in the data "
           f"+ {len(flagged):,} suspect, set to missing")
+    fixes = df["delist_fix"].value_counts()
+    changed = df["ret_exc_lead1m"].ne(df["ret_exc_lead1m_jkp"]) & df["ret_exc_lead1m_jkp"].notna() & ~suspect
+    diff = (df["ret_exc_lead1m_raw"] - df["ret_exc_lead1m_jkp"])[changed]
+    print(f"Delisting fix (01_clean.py) on universe rows whose target month is a delisting month: "
+          + ", ".join(f"{k} {v:,}" for k, v in fixes.items())
+          + f"; targets changed {int(changed.sum()):,} (mean change {diff.mean():+.4f}, mean |change| {diff.abs().mean():.4f})")
+    print(f"Rows of stocks that delist during month t (left out of month-t portfolios): {int(df['delisted'].sum()):,}; "
+          f"of these with a missing target: {int((df['delisted'] & df['ret_exc_lead1m'].isna()).sum()):,}")
     print(f"Stocks per month: " + (f"exactly {N:,} in every month" if (months == N).all() else f"not always {N:,}")
           + "; by decade (min-max): " + ", ".join(f"{d}s {g.min():,}-{g.max():,}"
                                                 for d, g in months.groupby(months.index.year // 10 * 10)))

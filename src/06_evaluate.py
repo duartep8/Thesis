@@ -40,9 +40,10 @@ marked and not tested.
 Alphas: long-short returns (gross and net) on Mkt-RF, SMB, HML, RMW, CMA and Mom, OLS
 with Newey-West standard errors (6 lags).
 
-Missing returns: our JKP file has no delisting returns, so every result is labelled
-provisional, pending delisting returns (04_portfolios.RESULT_STATUS). Next to the baseline
-(a held stock with a missing return counts as 0), two sensitivities rebuild each setup's
+Missing returns: delisting returns are in the targets (01_clean.py) and stocks that delist
+during month t are left out of the month-t portfolios; every result is labelled "pending the
+MthDelFlg check" (04_portfolios.RESULT_STATUS). For the few held returns still missing
+(baseline: they count as 0), two sensitivities rebuild each setup's
 portfolio from its saved predictions with held missing returns at -30% for all stocks, or
 for distressed stocks only (04_portfolios.py); the weights do not change. For each:
 gross and net Sharpe ratio, alphas and the yearly-vs-once tests.
@@ -176,7 +177,8 @@ def load_factors(ff_dir, months):
 # ---------------------------------------------------------------- trading costs
 
 def fill_spread(hold, panel_spread, clean_spread):
-    """bidaskhl_21d for every holdings row: panel at t, else clean at t, else own panel value at t-1."""
+    """bidaskhl_21d for every holdings row: panel at t, else clean at t, else own panel value at t-1.
+    Positions closed by a delisting (04: closed_by_delisting) get 0: the holder is paid out, not trading."""
     s = hold["bidaskhl_21d_raw"].astype(float).to_numpy().copy()
     counts = {"panel": int(np.isfinite(s).sum())}
     miss = ~np.isfinite(s)
@@ -188,6 +190,9 @@ def fill_spread(hold, panel_spread, clean_spread):
     counts["own_t-1"] = int(miss.sum() - (~np.isfinite(s)).sum())
     check(np.isfinite(s).all(), f"{(~np.isfinite(s)).sum()} holdings rows still lack a spread")
     check((s >= 0).all(), "negative spread")
+    closed = hold["closed_by_delisting"].to_numpy(bool)
+    s[closed] = 0.0
+    counts["closed_by_delisting"] = int(closed.sum())
     return s, counts
 
 
@@ -492,7 +497,8 @@ def main():
     c = pd.DataFrame(fill_counts).T.sum()
     print(f"Return months {months[0]:%Y-%m} to {months[-1]:%Y-%m} ({len(months)}). Spreads of holdings rows over all "
           f"setups: {c['panel']:,} from the panel at t, sold-out stocks {c['clean_t']:,} from clean at t and "
-          f"{c['own_t-1']:,} from their own value at t-1")
+          f"{c['own_t-1']:,} from their own value at t-1; positions closed by a delisting {c['closed_by_delisting']:,} "
+          "(no spread)")
     ff = load_factors(ff_dir, months)
     print(f"Factors: {ff.index[0]:%Y-%m} to {ff.index[-1]:%Y-%m}; all {len(months)} test months present; mean per month, "
           + ", ".join(f"{f} {ff.loc[months, f].mean():.2%}" for f in FACTORS))
@@ -511,6 +517,10 @@ def main():
                "cost_mean": d["cost_total"].mean(), "cost_long": d["cost_spread_long"].mean(),
                "cost_short": d["cost_spread_short"].mean(), "turnover": ref["turnover"],
                "breakeven_k": breakeven_zero(d["gross"], d["cost_total"])}
+        h = holds[s]
+        traded = h["trade"].abs()
+        row.update({"held_missing": missing[("baseline", s)][0], "n_closed_by_delisting": int(h["closed_by_delisting"].sum()),
+                    "closed_share_of_turnover": traded[h["closed_by_delisting"]].sum() / traded.sum()})
         for kind in ("gross", "net"):
             a = alpha_reg(d[kind], ff)
             alpha_rows.append({"model": model, "window": w, "freq": f, "val_share": v, "returns": kind, **a})
@@ -686,7 +696,7 @@ def main():
     num = lambda x, spec, width: f"{'':>{width}}" if pd.isna(x) else f"{x:>{width}{spec}}"
     print(f"\nAll results {p04.RESULT_STATUS.upper()}.")
     print(f"\nSummary, return months {months[0]:%Y-%m} to {months[-1]:%Y-%m}; long-short decile, capped value weights, "
-          f"missing returns = 0\n  {COST_LABEL}. Alphas: FF5 + Mom, Newey-West {NW_LAGS} lags. p: LW bootstrap.")
+          f"stocks delisting in t left out, remaining missing returns = 0\n  {COST_LABEL}. Alphas: FF5 + Mom, Newey-West {NW_LAGS} lags. p: LW bootstrap.")
     print(f"  {'window':<10}{'freq':<7}{'val':>4}{'SR gross':>9}{'SR net':>8}{'mean g':>8}{'mean n':>8}{'cost':>7}"
           f"{'turn':>6}{'k=0':>6}{'k eq':>6}{'alpha g':>8}{'t':>6}{'alpha n':>8}{'t':>6}{'p y/o g':>8}{'p y/o n':>8}"
           f"{'p ref g':>8}{'p ref n':>8}  note")
@@ -701,6 +711,13 @@ def main():
           f"which yearly and once have equal net Sharpe ratios (blank: none in [0, {K_MAX:g}])")
     print(f"  average cost per month: long side {summary['cost_long'].mean():.2%}, short side {summary['cost_short'].mean():.2%} "
           "(mean over setups)")
+
+    print("\nDelistings: stocks that delist during month t are left out of the month-t portfolios; a stock held into "
+          "its delisting month is closed at t (no spread)")
+    print(f"  {'window':<10}{'freq':<7}{'val':>4}{'held missing':>13}{'closed by delisting':>21}{'share of turnover':>19}")
+    for r in summary.itertuples():
+        print(f"  {lab(r.window, r.freq, r.val_share)}{r.held_missing:>13}{r.n_closed_by_delisting:>21}"
+              f"{r.closed_share_of_turnover:>19.2%}")
 
     vs = ["baseline", "m30_all", "m30_distressed"]
     piv = sensitivity.set_index(["window", "freq", "val_share", "missing_version"])

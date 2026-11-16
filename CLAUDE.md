@@ -56,19 +56,19 @@ how training choices and retraining affect forecasts and portfolio performance.
     changes), to separate the training-data effect from the tuning effect.
 
 ## Status of results
-- All performance results are **provisional, pending delisting returns** (our JKP file has
-  none; see "Still open"). Every 05/06 table carries this label (`04_portfolios.RESULT_STATUS`);
-  remove it only after the delisting returns are in `03_panel.py` and the models are rerun.
-- `06_evaluate.py` reports every setup under three treatments of held missing returns:
+- All performance results are labelled **pending the MthDelFlg check**: the models are run
+  on the delisting-corrected panel (see "Delisting returns" under Data decisions), but the
+  pattern rule has not yet been checked against CRSP's `MthDelFlg`. Every 05/06 table carries
+  this label (`04_portfolios.RESULT_STATUS`); remove it once the check is done.
+- `06_evaluate.py` reports every setup under three treatments of the remaining held missing returns:
   0 (baseline), −30% for all, and −30% for distressed stocks only (Sharpe ratios, alphas,
   yearly-vs-once tests; `06_<model>_missing_sensitivity.csv`).
 
 ## Still open (do not assume)
 - Neural network size.
-- CRSP delisting returns: the delisting file (PERMNO, delisting date, delisting return,
-  delisting code) has been requested from the supervisor. When it arrives: add the
-  delisting returns to `ret_exc_lead1m` in `03_panel.py`, using Shumway's −30% (−55% for
-  Nasdaq) only for performance-related delistings without a return; then rerun the models.
+- CRSP `MthDelFlg` (monthly delisting flag): extract requested from the supervisor. It says
+  exactly which monthly returns already include the delisting return; use it to check the
+  pattern rule in `01_clean.py` (a check, not a blocker).
 
 ## Data
 - `data/` holds the JKP Global Factor Data from WRDS (licensed):
@@ -99,9 +99,28 @@ how training choices and retraining affect forecasts and portfolio performance.
   characteristic coverage: in the universe, the mean missing share is 47% in 1960,
   15% in 1975, about 11% from 1977.
 - Drop rows with missing `me` (rare). Keep rows with a missing `ret_exc_lead1m`
-  (dropped only at training) to avoid look-ahead. In 1975–2025 these are 0.35% of the
-  panel and almost all are a stock's last month in the data: our JKP file has no
-  delisting returns. Most look like takeovers, not failures.
+  (dropped only at training) to avoid look-ahead. In 1975–2025 almost all of them are the
+  stock's delisting month: it stopped trading during month t, so there is no month t+1.
+  93% are mergers.
+- Delisting returns (`01_clean.py`, step 6; CRSP CIZ file `data/crsp_delist/Data_Delisting.csv`):
+  - JKP already compounds CRSP's delisting return into the return of the delisting month
+    (the target of row t−1), with −30% for performance-related delistings without one.
+    Our JKP vintage counts it twice when CRSP's `MthRet` already includes it (JKP fixed
+    this in jkp-data on 02-09-2026; our download predates the fix).
+  - Pattern rule, per delisting month: compare (1 + ret) / price relative with
+    (1 + delret)^k. k = 2 → corrected to (1 + ret)/(1 + delret) − 1 − rf (rf from the
+    delisting-month row): `fixed`. k = 1, or delret = 0 or −1: `unchanged`. Missing delret
+    with JKP's ×0.70 on Nasdaq → ×0.45 (Shumway & Warther −55%): `nasdaq55`. Exact match
+    first (tolerance 1e-4), else allowing a dividend yield of 0–5% in that month; if
+    neither or both readings fit: `ambiguous`, left unchanged.
+  - Columns: `ret_exc_lead1m_jkp` (JKP's original), `delist_fix` / `delist_fix_how` on
+    row t−1, `delisted` on row t. `ret_exc_lead1m_raw` is the target before the suspect
+    rule (after the delisting fix).
+  - Stocks that delist during month t stay in the universe and the ranks at t but are left
+    out of the month-t portfolios (known at t). A position held into its delisting month
+    is closed at t: counted in turnover, no spread charged (the holder is paid out).
+  - Not corrected: characteristics of the delisting-month row (e.g. `ret_1_0`) still hold
+    the double count; that row is never traded or trained on.
 - Characteristics: JKP's 153, ranked each month across the universe to [−1, 1];
   missing values = 0 (the median), following Gu, Kelly & Xiu (2020). No winsorizing.
 - Universe: the 1,000 largest stocks by `me` each month.
@@ -109,7 +128,8 @@ how training choices and retraining affect forecasts and portfolio performance.
   50% of its `me` in t. The original is kept in `ret_exc_lead1m_raw`, the row is
   flagged in `ret_exc_lead1m_suspect`, and `ret_exc_lead1m` is set to missing: dropped
   from training; in portfolios it counts as 0 and is logged (4 rows in 1975–2025).
-- A held stock with a missing return counts as 0 and is logged (baseline). Sensitivity
+- A held stock with a still-missing return (suspect returns, trading halts without a CRSP
+  delisting record, a few gaps) counts as 0 and is logged (baseline). Sensitivity
   (`04_portfolios.py --missing-return -0.3 --missing-scope all|distressed`): it counts as
   −30%, for all missing returns or only for distressed stocks (unranked `ret_12_1` below
   −50% or last-month `ret_exc` below −30%, both known at t).
