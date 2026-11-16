@@ -52,8 +52,9 @@ PANEL_COLS = ["id", "eom", "me", "size_grp", "ret_exc", "ret_exc_lead1m", "ret_e
               "delisted", "delist_fix"]
 FRAC = 0.10
 SEED = 42
-# Label for every performance result until CRSP's MthDelFlg has checked the delisting fix in 01_clean.py
-RESULT_STATUS = "pending the MthDelFlg check"
+# Optional label for every performance result: when set, 05 and 06 add it as a status column
+# to their tables and print it (e.g. while an input is provisional). None: no label.
+RESULT_STATUS = None
 PERIODS = [(1975, 1989), (1990, 2025)]
 # Missing-return versions: (label, value for a held stock with a missing return, scope)
 MISSING_VERSIONS = [("baseline: missing = 0", 0.0, "all"),

@@ -1,49 +1,49 @@
-status,kind,window,freq,val_a,setting_alpha,setting_l1_ratio,n_nonzero_median,n_nonzero_min,n_nonzero_max,train_months_first,val_b,pred_pearson,pred_spearman,months_constant,long_overlap,short_overlap,ls_return_corr
-pending the MthDelFlg check,setup,5y,once,0.25,0.00379719,0.1,33,33,33,45,,,,,,,
-pending the MthDelFlg check,setup,5y,once,0.3,0.00278252,0.1,41,41,41,42,,,,,,,
-pending the MthDelFlg check,setup,5y,once,0.35,0.00518993,0.1,24,24,24,39,,,,,,,
-pending the MthDelFlg check,pair,5y,once,0.25,,,,,,,0.3,0.981792,0.979931,0,0.863688,0.862337,0.980159
-pending the MthDelFlg check,pair,5y,once,0.3,,,,,,,0.35,0.974156,0.971951,0,0.835808,0.837273,0.966225
-pending the MthDelFlg check,pair,5y,once,0.25,,,,,,,0.35,0.976014,0.973902,0,0.840584,0.845147,0.973662
-pending the MthDelFlg check,setup,5y,yearly,0.25,0.00379719,0.1,35,17,65,45,,,,,,,
-pending the MthDelFlg check,setup,5y,yearly,0.3,0.00278252,0.1,46.5,31,77,42,,,,,,,
-pending the MthDelFlg check,setup,5y,yearly,0.35,0.00518993,0.1,26.5,16,59,39,,,,,,,
-pending the MthDelFlg check,pair,5y,yearly,0.25,,,,,,,0.3,0.942667,0.937662,0,0.771315,0.777742,0.905003
-pending the MthDelFlg check,pair,5y,yearly,0.3,,,,,,,0.35,0.92408,0.918313,0,0.732744,0.738307,0.916157
-pending the MthDelFlg check,pair,5y,yearly,0.25,,,,,,,0.35,0.904398,0.897317,0,0.706193,0.715734,0.837153
-pending the MthDelFlg check,setup,10y,once,0.25,0.00214249,0.1,47,47,47,90,,,,,,,
-pending the MthDelFlg check,setup,10y,once,0.3,0.00631009,0.1,15,15,15,84,,,,,,,
-pending the MthDelFlg check,setup,10y,once,0.35,0.00877926,0.1,11,11,11,78,,,,,,,
-pending the MthDelFlg check,pair,10y,once,0.25,,,,,,,0.3,0.905657,0.895903,0,0.633913,0.738093,0.957457
-pending the MthDelFlg check,pair,10y,once,0.3,,,,,,,0.35,0.973196,0.970774,0,0.83083,0.834813,0.968629
-pending the MthDelFlg check,pair,10y,once,0.25,,,,,,,0.35,0.859139,0.846859,0,0.56506,0.673124,0.92509
-pending the MthDelFlg check,setup,10y,yearly,0.25,0.00214249,0.1,46.5,36,71,90,,,,,,,
-pending the MthDelFlg check,setup,10y,yearly,0.3,0.00631009,0.1,15,7,29,84,,,,,,,
-pending the MthDelFlg check,setup,10y,yearly,0.35,0.00877926,0.1,10,2,25,78,,,,,,,
-pending the MthDelFlg check,pair,10y,yearly,0.25,,,,,,,0.3,0.839457,0.828702,0,0.617801,0.626405,0.667193
-pending the MthDelFlg check,pair,10y,yearly,0.3,,,,,,,0.35,0.911373,0.905781,0,0.732258,0.73451,0.865075
-pending the MthDelFlg check,pair,10y,yearly,0.25,,,,,,,0.35,0.733305,0.720543,0,0.511472,0.518114,0.487499
-pending the MthDelFlg check,setup,15y,once,0.25,0.00947038,0.1,9,9,9,135,,,,,,,
-pending the MthDelFlg check,setup,15y,once,0.3,0.0070693,0.1,14,14,14,126,,,,,,,
-pending the MthDelFlg check,setup,15y,once,0.35,0.00962504,0.1,7,7,7,117,,,,,,,
-pending the MthDelFlg check,pair,15y,once,0.25,,,,,,,0.3,0.990896,0.98964,0,0.909014,0.903129,0.987012
-pending the MthDelFlg check,pair,15y,once,0.3,,,,,,,0.35,0.986057,0.984308,0,0.87299,0.886925,0.977625
-pending the MthDelFlg check,pair,15y,once,0.25,,,,,,,0.35,0.983061,0.98107,0,0.868678,0.864981,0.972295
-pending the MthDelFlg check,setup,15y,yearly,0.25,0.00947038,0.1,8.5,1,16,135,,,,,,,
-pending the MthDelFlg check,setup,15y,yearly,0.3,0.0070693,0.1,13,5,24,126,,,,,,,
-pending the MthDelFlg check,setup,15y,yearly,0.35,0.00962504,0.1,8,1,20,117,,,,,,,
-pending the MthDelFlg check,pair,15y,yearly,0.25,,,,,,,0.3,0.922503,0.91737,0,0.734559,0.765124,0.878893
-pending the MthDelFlg check,pair,15y,yearly,0.3,,,,,,,0.35,0.899068,0.893564,0,0.707131,0.735324,0.802224
-pending the MthDelFlg check,pair,15y,yearly,0.25,,,,,,,0.35,0.870836,0.862627,0,0.680432,0.723576,0.786979
-pending the MthDelFlg check,setup,expanding,once,0.25,0.00947038,0.1,9,9,9,135,,,,,,,
-pending the MthDelFlg check,setup,expanding,once,0.3,0.0070693,0.1,14,14,14,126,,,,,,,
-pending the MthDelFlg check,setup,expanding,once,0.35,0.00962504,0.1,7,7,7,117,,,,,,,
-pending the MthDelFlg check,pair,expanding,once,0.25,,,,,,,0.3,0.990896,0.98964,0,0.909014,0.903129,0.987012
-pending the MthDelFlg check,pair,expanding,once,0.3,,,,,,,0.35,0.986057,0.984308,0,0.87299,0.886925,0.977625
-pending the MthDelFlg check,pair,expanding,once,0.25,,,,,,,0.35,0.983061,0.98107,0,0.868678,0.864981,0.972295
-pending the MthDelFlg check,setup,expanding,yearly,0.25,0.00947038,0.1,7,5,12,135,,,,,,,
-pending the MthDelFlg check,setup,expanding,yearly,0.3,0.0070693,0.1,12.5,8,19,126,,,,,,,
-pending the MthDelFlg check,setup,expanding,yearly,0.35,0.00962504,0.1,7,5,12,117,,,,,,,
-pending the MthDelFlg check,pair,expanding,yearly,0.25,,,,,,,0.3,0.950817,0.947143,0,0.790613,0.798497,0.888629
-pending the MthDelFlg check,pair,expanding,yearly,0.3,,,,,,,0.35,0.955969,0.953579,0,0.807479,0.820259,0.937997
-pending the MthDelFlg check,pair,expanding,yearly,0.25,,,,,,,0.35,0.954866,0.951417,0,0.802116,0.808509,0.918341
+kind,window,freq,val_a,setting_alpha,setting_l1_ratio,n_nonzero_median,n_nonzero_min,n_nonzero_max,train_months_first,val_b,pred_pearson,pred_spearman,months_constant,long_overlap,short_overlap,ls_return_corr
+setup,5y,once,0.25,0.00379885,0.1,33,33,33,45,,,,,,,
+setup,5y,once,0.3,0.00278343,0.1,41,41,41,42,,,,,,,
+setup,5y,once,0.35,0.00519177,0.1,24,24,24,39,,,,,,,
+pair,5y,once,0.25,,,,,,,0.3,0.981826,0.979966,0,0.863665,0.862129,0.980125
+pair,5y,once,0.3,,,,,,,0.35,0.974152,0.971948,0,0.835645,0.837203,0.965864
+pair,5y,once,0.25,,,,,,,0.35,0.976002,0.973887,0,0.840259,0.845286,0.973766
+setup,5y,yearly,0.25,0.00379885,0.1,35,17,66,45,,,,,,,
+setup,5y,yearly,0.3,0.00278343,0.1,46,31,78,42,,,,,,,
+setup,5y,yearly,0.35,0.00519177,0.1,26.5,16,59,39,,,,,,,
+pair,5y,yearly,0.25,,,,,,,0.3,0.942643,0.937636,0,0.771268,0.777765,0.905521
+pair,5y,yearly,0.3,,,,,,,0.35,0.924065,0.918293,0,0.732558,0.738238,0.91595
+pair,5y,yearly,0.25,,,,,,,0.35,0.904376,0.897291,0,0.7061,0.715594,0.837048
+setup,10y,once,0.25,0.00214229,0.1,48,48,48,90,,,,,,,
+setup,10y,once,0.3,0.00630953,0.1,15,15,15,84,,,,,,,
+setup,10y,once,0.35,0.00877835,0.1,11,11,11,78,,,,,,,
+pair,10y,once,0.25,,,,,,,0.3,0.905671,0.89592,0,0.634098,0.737792,0.957082
+pair,10y,once,0.3,,,,,,,0.35,0.973196,0.970777,0,0.830807,0.834743,0.968923
+pair,10y,once,0.25,,,,,,,0.35,0.859039,0.846753,0,0.564991,0.672892,0.925069
+setup,10y,yearly,0.25,0.00214229,0.1,47,36,71,90,,,,,,,
+setup,10y,yearly,0.3,0.00630953,0.1,15,7,29,84,,,,,,,
+setup,10y,yearly,0.35,0.00877835,0.1,10,2,25,78,,,,,,,
+pair,10y,yearly,0.25,,,,,,,0.3,0.839447,0.82869,0,0.617802,0.626174,0.66732
+pair,10y,yearly,0.3,,,,,,,0.35,0.911359,0.905762,0,0.732375,0.734555,0.865364
+pair,10y,yearly,0.25,,,,,,,0.35,0.733278,0.720512,0,0.511519,0.518252,0.488212
+setup,15y,once,0.25,0.00946829,0.1,9,9,9,135,,,,,,,
+setup,15y,once,0.3,0.00706762,0.1,14,14,14,126,,,,,,,
+setup,15y,once,0.35,0.00962198,0.1,7,7,7,117,,,,,,,
+pair,15y,once,0.25,,,,,,,0.3,0.990905,0.989652,0,0.908967,0.902966,0.986722
+pair,15y,once,0.3,,,,,,,0.35,0.986058,0.98431,0,0.872966,0.88704,0.977508
+pair,15y,once,0.25,,,,,,,0.35,0.983087,0.981097,0,0.868678,0.86512,0.972197
+setup,15y,yearly,0.25,0.00946829,0.1,8.5,1,16,135,,,,,,,
+setup,15y,yearly,0.3,0.00706762,0.1,13,5,24,126,,,,,,,
+setup,15y,yearly,0.35,0.00962198,0.1,8,1,20,117,,,,,,,
+pair,15y,yearly,0.25,,,,,,,0.3,0.922459,0.91732,0,0.73435,0.765008,0.878171
+pair,15y,yearly,0.3,,,,,,,0.35,0.899113,0.893602,0,0.707014,0.735277,0.801475
+pair,15y,yearly,0.25,,,,,,,0.35,0.870761,0.862549,0,0.680108,0.723461,0.786706
+setup,expanding,once,0.25,0.00946829,0.1,9,9,9,135,,,,,,,
+setup,expanding,once,0.3,0.00706762,0.1,14,14,14,126,,,,,,,
+setup,expanding,once,0.35,0.00962198,0.1,7,7,7,117,,,,,,,
+pair,expanding,once,0.25,,,,,,,0.3,0.990905,0.989652,0,0.908967,0.902966,0.986722
+pair,expanding,once,0.3,,,,,,,0.35,0.986058,0.98431,0,0.872966,0.88704,0.977508
+pair,expanding,once,0.25,,,,,,,0.35,0.983087,0.981097,0,0.868678,0.86512,0.972197
+setup,expanding,yearly,0.25,0.00946829,0.1,7,5,12,135,,,,,,,
+setup,expanding,yearly,0.3,0.00706762,0.1,12.5,8,19,126,,,,,,,
+setup,expanding,yearly,0.35,0.00962198,0.1,7,5,12,117,,,,,,,
+pair,expanding,yearly,0.25,,,,,,,0.3,0.950821,0.947145,0,0.790612,0.798637,0.889307
+pair,expanding,yearly,0.3,,,,,,,0.35,0.955985,0.953594,0,0.807641,0.820283,0.937683
+pair,expanding,yearly,0.25,,,,,,,0.35,0.954873,0.951423,0,0.802,0.808439,0.919551

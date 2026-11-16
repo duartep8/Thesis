@@ -56,19 +56,18 @@ how training choices and retraining affect forecasts and portfolio performance.
     changes), to separate the training-data effect from the tuning effect.
 
 ## Status of results
-- All performance results are labelled **pending the MthDelFlg check**: the models are run
-  on the delisting-corrected panel (see "Delisting returns" under Data decisions), but the
-  pattern rule has not yet been checked against CRSP's `MthDelFlg`. Every 05/06 table carries
-  this label (`04_portfolios.RESULT_STATUS`); remove it once the check is done.
+- Results include CRSP delisting returns, with the double count in our JKP vintage removed
+  by CRSP's `MthDelFlg` (see "Delisting returns" under Data decisions). No provisional label
+  is set; `04_portfolios.RESULT_STATUS` adds one to every 05/06 table (a `status` column)
+  if an input becomes provisional again.
 - `06_evaluate.py` reports every setup under three treatments of the remaining held missing returns:
   0 (baseline), −30% for all, and −30% for distressed stocks only (Sharpe ratios, alphas,
   yearly-vs-once tests; `06_<model>_missing_sensitivity.csv`).
 
 ## Still open (do not assume)
 - Neural network size.
-- CRSP `MthDelFlg` (monthly delisting flag): extract requested from the supervisor. It says
-  exactly which monthly returns already include the delisting return; use it to check the
-  pattern rule in `01_clean.py` (a check, not a blocker).
+- Optional: CRSP `MthRet` for the delisting months, to check the corrected returns value by
+  value (the flag already decides which months were double counted).
 
 ## Data
 - `data/` holds the JKP Global Factor Data from WRDS (licensed):
@@ -102,19 +101,32 @@ how training choices and retraining affect forecasts and portfolio performance.
   (dropped only at training) to avoid look-ahead. In 1975–2025 almost all of them are the
   stock's delisting month: it stopped trading during month t, so there is no month t+1.
   93% are mergers.
-- Delisting returns (`01_clean.py`, step 6; CRSP CIZ file `data/crsp_delist/Data_Delisting.csv`):
+- Delisting returns (`01_clean.py`, step 6). Two CRSP CIZ files from the supervisor:
+  `data/crsp_delist/Data_Delisting.csv` (delisting events: date, delret, reasons) and
+  `data/crsp_delist/16_11_data.csv` (the CIZ monthly file's `MthDelFlg` by PERMNO and month;
+  duplicate rows dropped):
   - JKP already compounds CRSP's delisting return into the return of the delisting month
     (the target of row t−1), with −30% for performance-related delistings without one.
     Our JKP vintage counts it twice when CRSP's `MthRet` already includes it (JKP fixed
     this in jkp-data on 02-09-2026; our download predates the fix).
-  - Pattern rule, per delisting month: compare (1 + ret) / price relative with
-    (1 + delret)^k. k = 2 → corrected to (1 + ret)/(1 + delret) − 1 − rf (rf from the
-    delisting-month row): `fixed`. k = 1, or delret = 0 or −1: `unchanged`. Missing delret
-    with JKP's ×0.70 on Nasdaq → ×0.45 (Shumway & Warther −55%): `nasdaq55`. Exact match
-    first (tolerance 1e-4), else allowing a dividend yield of 0–5% in that month; if
-    neither or both readings fit: `ambiguous`, left unchanged.
-  - Columns: `ret_exc_lead1m_jkp` (JKP's original), `delist_fix` / `delist_fix_how` on
-    row t−1, `delisted` on row t. `ret_exc_lead1m_raw` is the target before the suspect
+  - Primary rule, CRSP's `MthDelFlg` of the delisting month (definitions from CRSP's US
+    Stock guide): A or P (MthRet includes the delisting return, so JKP counted it twice) →
+    corrected to (1 + ret)/(1 + delret) − 1 − rf (rf from the delisting-month row): `fixed`
+    (`unchanged` if delret = 0 or −1). M or G (MthRet excludes it, so JKP's single
+    compounding, or its −30% for a missing delret, stands) → `unchanged`; JKP's ×0.70 on
+    Nasdaq → ×0.45 (Shumway & Warther −55%): `nasdaq55`.
+  - Pattern rule, for V and for months without a flag, and as a logged check on every row
+    (each disagreement with the flag is listed in `data/reports/01_clean.log`): compare
+    (1 + ret) / price relative with (1 + delret)^k; k = 2 → `fixed`, k = 1 → `unchanged`;
+    ×0.70 on Nasdaq → `nasdaq55`. Exact match first (tolerance 1e-4), else allowing a
+    dividend yield of 0–5%; if neither or both readings fit: `ambiguous`, left unchanged.
+  - Why V uses the pattern: V is not defined in CRSP's guide. JKP treats it as "included",
+    and most V months are indeed counted twice, but 11 (mostly 1975–1983 liquidations)
+    contain (1 + delret) exactly once in JKP's return; there, dividing by (1 + delret) would
+    remove a real delisting return. The pattern reads JKP's actual number, so it decides.
+  - Columns: `ret_exc_lead1m_jkp` (JKP's original), `delist_flag` (MthDelFlg),
+    `delist_fix` / `delist_fix_how` (`flag` or the pattern's match) on row t−1, `delisted`
+    on row t. `ret_exc_lead1m_raw` is the target before the suspect
     rule (after the delisting fix).
   - Stocks that delist during month t stay in the universe and the ranks at t but are left
     out of the month-t portfolios (known at t). A position held into its delisting month
@@ -127,7 +139,7 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Suspect returns: `ret_exc_lead1m` ≤ −0.90 while the stock's `me` in t+1 is at least
   50% of its `me` in t. The original is kept in `ret_exc_lead1m_raw`, the row is
   flagged in `ret_exc_lead1m_suspect`, and `ret_exc_lead1m` is set to missing: dropped
-  from training; in portfolios it counts as 0 and is logged (4 rows in 1975–2025).
+  from training; in portfolios it counts as 0 and is logged (3 rows in 1975–2025).
 - A held stock with a still-missing return (suspect returns, trading halts without a CRSP
   delisting record, a few gaps) counts as 0 and is logged (baseline). Sensitivity
   (`04_portfolios.py --missing-return -0.3 --missing-scope all|distressed`): it counts as

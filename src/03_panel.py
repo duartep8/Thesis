@@ -41,9 +41,9 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parent.parent
 CHARS_153_FILE = ROOT / "src" / "characteristics_153.txt"
 KEYS = ["id", "eom", "size_grp", "me", "ret_exc", "ret_exc_lead1m"]
-# From 01_clean.py's delisting step: JKP's original target, the fix flag on row t-1, and
+# From 01_clean.py's delisting step: JKP's original target, CRSP's MthDelFlg and the fix flag on row t-1, and
 # whether the stock delists during month t (04 leaves those out of the month-t portfolios)
-DELIST = ["ret_exc_lead1m_jkp", "delist_fix", "delist_fix_how", "delisted"]
+DELIST = ["ret_exc_lead1m_jkp", "delist_flag", "delist_fix", "delist_fix_how", "delisted"]
 LIQUIDITY = ["bidaskhl_21d", "dolvol_126d"]
 
 

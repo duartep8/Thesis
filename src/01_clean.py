@@ -18,7 +18,13 @@ Steps (rows are counted at each one):
      vintage counts it twice when CRSP's MthRet already includes it (fixed in jkp-data on
      02-09-2026). For each delisting row t (the month of delistingdt) whose previous row
      is month t-1, ratio = (1 + ret) / price relative (prices adjusted with adjfct when
-     available) is compared with (1 + delret)^k:
+     available) is compared with (1 + delret)^k (the pattern rule). Primary rule: CRSP's
+     MthDelFlg for the delisting month (--delist-flags, CIZ monthly file, duplicate rows
+     dropped): A or P (MthRet includes delret, JKP compounded it again) -> 'fixed', or
+     'unchanged' if delret is 0 or -1; M or G (MthRet excludes delret) -> 'unchanged', or
+     'nasdaq55' where the pattern finds JKP's x0.70 on Nasdaq. V (not defined in CRSP's
+     guide) and months without a flag use the pattern rule. The pattern is also run on every
+     row as a check; each disagreement with the flag is logged. Pattern rule:
        - k = 2 (counted twice): ret_exc of row t and ret_exc_lead1m of row t-1 become
          (1 + ret) / (1 + delret) - 1 - rf, rf = ret - ret_exc of row t  -> 'fixed'
        - k = 1 (counted once), delret = 0 or -1 (both readings agree)  -> 'unchanged'
@@ -27,7 +33,7 @@ Steps (rows are counted at each one):
        Exact match first (|ratio - m| <= TOL); if neither or both readings match, a dividend
        in the delisting month is allowed: the reading whose implied yield ratio / m - 1 lies
        in [0, 5%] wins (delist_fix_how = 'dividend'). Neither or both -> 'ambiguous', left as is.
-     New columns: ret_exc_lead1m_jkp (JKP's target, untouched), delist_fix and
+     New columns: ret_exc_lead1m_jkp (JKP's target, untouched), delist_flag (MthDelFlg), delist_fix and
      delist_fix_how on row t-1 (empty if the target month is not a delisting month), and
      delisted on row t (the stock delists during month t; known at t, so it is no
      look-ahead: such stocks are left out of the month-t portfolios in 04).
@@ -46,6 +52,7 @@ from pathlib import Path
 
 import duckdb
 import numpy as np
+import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 CHARS_153_FILE = ROOT / "src" / "characteristics_153.txt"
@@ -73,7 +80,7 @@ PRICE_COLS = {"ret": "DOUBLE", "prc": "DOUBLE", "adjfct": "DOUBLE"}
 # Delisting step: exact-match tolerance on the ratio, largest implied dividend yield,
 # JKP's imputed -30% and the Nasdaq value that replaces it.
 TOL, DIV_MAX, JKP_IMPUTED, NASDAQ_IMPUTED = 1e-4, 0.05, 0.70, 0.45
-NEW_COLS = {"ret_exc_lead1m_jkp": "DOUBLE", "delist_fix": "VARCHAR", "delist_fix_how": "VARCHAR",
+NEW_COLS = {"ret_exc_lead1m_jkp": "DOUBLE", "delist_flag": "VARCHAR", "delist_fix": "VARCHAR", "delist_fix_how": "VARCHAR",
             "delisted": "BOOLEAN"}
 
 
@@ -88,8 +95,36 @@ def load_delistings(con, path):
     return n, lo, hi
 
 
+def load_flags(con, path):
+    """CRSP CIZ monthly MthDelFlg as table fl (permno, month, flg), duplicate rows dropped."""
+    con.execute(f"""CREATE TABLE fl_raw AS SELECT CAST(PERMNO AS BIGINT) AS permno,
+                    date_trunc('month', CAST(MthCalDt AS DATE)) AS m, MthDelFlg AS flg
+                    FROM read_csv({sql_str(path)}, header = true, all_varchar = true)""")
+    n_raw = con.execute("SELECT count(*) FROM fl_raw").fetchone()[0]
+    con.execute("CREATE TABLE fl AS SELECT DISTINCT permno, m, flg FROM fl_raw")
+    con.execute("DROP TABLE fl_raw")
+    n, conflict = con.execute("SELECT count(*), count(*) - count(DISTINCT (permno, m)) FROM fl").fetchone()
+    if conflict:
+        sys.exit(f"{path}: {conflict:,} (PERMNO, month) pairs carry different flags")
+    counts = con.execute("SELECT flg, count(*) FROM fl GROUP BY 1 ORDER BY 2 DESC").fetchall()
+    return [f"MthDelFlg file: {n_raw:,} rows, {n_raw - n:,} duplicate rows dropped -> {n:,} (PERMNO, month); "
+            + ", ".join(f"{f} {c:,}" for f, c in counts)]
+
+
+def flag_decision(flag, delret, pattern):
+    """(delist_fix, how) implied by CRSP's MthDelFlg, or None if the flag does not decide (V, N, no flag).
+    A/P: MthRet includes delret, and JKP compounded it again -> fix. M/G: MthRet excludes it, so
+    JKP's single compounding (or its -30% for a missing delret) stands; nasdaq55 where the pattern
+    found JKP's x0.70 on Nasdaq."""
+    if flag in ("A", "P") and np.isfinite(delret):
+        return ("unchanged", "flag (readings agree)") if delret in (0.0, -1.0) else ("fixed", "flag")
+    if flag in ("M", "G"):
+        return ("nasdaq55", "flag") if flag == "M" and pattern == "nasdaq55" else ("unchanged", "flag")
+    return None
+
+
 def classify_delisting(r):
-    """(flag, how, multiplier m that JKP applied) for one delisting row; see step 6."""
+    """Pattern rule: (flag, how, multiplier m that JKP applied) for one delisting row; see step 6."""
     d, ratio = r.delret, r.ratio
     if not np.isfinite(ratio):
         return "ambiguous", "no ratio", np.nan
@@ -108,9 +143,10 @@ def classify_delisting(r):
     return "ambiguous", "both readings fit" if len(div) == 2 else "neither reading fits", np.nan
 
 
-def fix_delistings(con, path):
+def fix_delistings(con, path, flag_path):
     """Step 6 on table d; returns report lines."""
     n_file, lo, hi = load_delistings(con, path)
+    flag_lines = load_flags(con, flag_path)
     for c, t in NEW_COLS.items():
         con.execute(f"ALTER TABLE d ADD COLUMN {c} {t}")
     con.execute("UPDATE d SET ret_exc_lead1m_jkp = ret_exc_lead1m, delisted = false")
@@ -118,8 +154,10 @@ def fix_delistings(con, path):
                    WHERE dl.permno = d.id AND date_trunc('month', dl.delistingdt) = date_trunc('month', d.eom)""")
     rows = con.execute("""
         SELECT t.id, t.eom, t.ret, t.ret_exc, t.prc, t.adjfct, dl.delret, dl.delactiontype, dl.delreasontype,
-               dl.primaryexch, p.eom AS eom_prev, p.prc AS prc_prev, p.adjfct AS adj_prev, p.ret_exc_lead1m AS y_prev
+               dl.primaryexch, p.eom AS eom_prev, p.prc AS prc_prev, p.adjfct AS adj_prev, p.ret_exc_lead1m AS y_prev,
+               fl.flg AS delist_flag
         FROM d t JOIN dl ON dl.permno = t.id AND date_trunc('month', dl.delistingdt) = date_trunc('month', t.eom)
+        LEFT JOIN fl ON fl.permno = t.id AND fl.m = date_trunc('month', t.eom)
         LEFT JOIN d p ON p.id = t.id AND p.eom = last_day(t.eom - INTERVAL 1 MONTH)""").df()
     n_in_data = len(rows)
     rows = rows[rows["eom_prev"].notna()].copy()
@@ -129,7 +167,12 @@ def fix_delistings(con, path):
     rows["ratio"] = ((1 + rows["ret"]) / rel.where(np.isfinite(rel) & (rel > 0))).astype(float)
     rows["delret"] = rows["delret"].astype(float)
     out = [classify_delisting(r) for r in rows.itertuples()]
-    rows["delist_fix"], rows["delist_fix_how"], rows["m"] = [o[0] for o in out], [o[1] for o in out], [o[2] for o in out]
+    rows["pattern"], rows["pattern_how"] = [o[0] for o in out], [o[1] for o in out]
+    # Primary rule: CRSP's flag where it decides (A, P, M, G); the pattern rule for V and months without a flag
+    final = [flag_decision(r.delist_flag, r.delret, r.pattern) or (r.pattern, r.pattern_how) for r in rows.itertuples()]
+    rows["delist_fix"], rows["delist_fix_how"] = [o[0] for o in final], [o[1] for o in final]
+    decided = rows["delist_fix_how"].str.startswith("flag")
+    disagree = decided & (rows["pattern"] != "ambiguous") & (rows["pattern"] != rows["delist_fix"])
     # The target of row t-1 must be JKP's return of month t
     mismatch = ~np.isclose(rows["y_prev"], rows["ret_exc"], rtol=0, atol=1e-9) & rows["y_prev"].notna()
     rows.loc[mismatch, ["delist_fix", "delist_fix_how"]] = ["ambiguous", "target differs from next ret_exc"]
@@ -142,29 +185,41 @@ def fix_delistings(con, path):
     if not np.isfinite(rows.loc[fixed | nas, "new"]).all():
         sys.exit("Delisting step: a corrected return is not finite")
 
-    upd = rows[["id", "eom", "eom_prev", "new", "delist_fix", "delist_fix_how"]]
+    upd = rows[["id", "eom", "eom_prev", "new", "delist_flag", "delist_fix", "delist_fix_how"]]
     con.register("upd", upd)
     con.execute("""UPDATE d SET ret_exc = upd.new FROM upd
                    WHERE d.id = upd.id AND d.eom = upd.eom AND upd.delist_fix IN ('fixed', 'nasdaq55')""")
-    con.execute("""UPDATE d SET delist_fix = upd.delist_fix, delist_fix_how = upd.delist_fix_how,
+    con.execute("""UPDATE d SET delist_flag = upd.delist_flag, delist_fix = upd.delist_fix, delist_fix_how = upd.delist_fix_how,
                    ret_exc_lead1m = CASE WHEN upd.delist_fix IN ('fixed', 'nasdaq55') AND d.ret_exc_lead1m IS NOT NULL
                                          THEN upd.new ELSE d.ret_exc_lead1m END
                    FROM upd WHERE d.id = upd.id AND d.eom = CAST(upd.eom_prev AS DATE)""")
     con.unregister("upd")
 
     chg = (rows["new"] - rows["ret_exc"])
-    lines = [f"Delisting file: {n_file:,} PERMNOs, delistings {lo} to {hi}",
+    lines = [f"Delisting file: {n_file:,} PERMNOs, delistings {lo} to {hi}"] + flag_lines + [
              f"Delisting months in the data: {n_in_data:,}; with a row in month t-1: {len(rows):,} "
              f"(no previous month, nothing to fix: {no_prev:,}); target of t-1 differs from ret_exc of t: {int(mismatch.sum()):,}",
              f"  {'flag':<11}{'how':<34}{'rows':>8}{'mean change':>13}{'mean |change|':>15}{'max |delret|':>14}"]
     for (f, h), g in rows.groupby(["delist_fix", "delist_fix_how"]):
         c = chg[g.index]
         lines.append(f"  {f:<11}{h:<34}{len(g):>8,}{c.mean():>13.4f}{c.abs().mean():>15.4f}{g['delret'].abs().max():>14.4f}")
+    # The pattern rule as a check on the flag
+    lines.append("Pattern rule vs MthDelFlg (rows: flag in the delisting month; columns: pattern result):")
+    tab = pd.crosstab(rows["delist_flag"].fillna("none"), rows["pattern"])
+    lines.append("  " + f"{'flag':<6}" + "".join(f"{c:>11}" for c in tab.columns))
+    for f, r in tab.iterrows():
+        lines.append("  " + f"{f:<6}" + "".join(f"{v:>11,}" for v in r))
+    lines.append(f"Decided by the flag (A, P, M, G): {int(decided.sum()):,}; pattern ambiguous there, resolved by the flag: "
+                 f"{int((decided & (rows['pattern'] == 'ambiguous')).sum()):,}; pattern disagrees with the flag: "
+                 f"{int(disagree.sum()):,} (flag applied). Decided by the pattern (V or no flag): {int((~decided).sum()):,}")
+    for r in rows[disagree].sort_values("eom").itertuples():
+        lines.append(f"    disagreement {r.id:>7} {r.eom:%Y-%m} flag {r.delist_flag} -> {r.delist_fix:<9} pattern {r.pattern} "
+                     f"({r.pattern_how}); delret {r.delret:.4f} {r.delactiontype}/{r.delreasontype}")
     amb = rows[rows["delist_fix"] == "ambiguous"]
     big = amb[amb["delret"].abs() > 0.20].sort_values("eom")
     lines.append(f"Ambiguous (left unchanged): {len(amb):,}; |delret| > 5%: {int((amb['delret'].abs() > 0.05).sum()):,}; "
                  f"> 20%: {len(big):,}" + (" (all US rows; the panel subset is reported later)" if len(big) else ""))
-    for r in big.head(50).itertuples():
+    for r in big.itertuples():
         lines.append(f"    {r.id:>7} {r.eom:%Y-%m} delret {r.delret:>8.4f} {r.delactiontype}/{r.delreasontype} "
                      f"ratio {r.ratio:.4f} ({r.delist_fix_how})")
     return lines
@@ -219,6 +274,8 @@ def main():
     parser.add_argument("--out", default=str(ROOT / "data" / "clean.parquet"))
     parser.add_argument("--delist", default=str(ROOT / "data" / "crsp_delist" / "Data_Delisting.csv"),
                         help="CRSP CIZ delisting file (step 6)")
+    parser.add_argument("--delist-flags", default=str(ROOT / "data" / "crsp_delist" / "16_11_data.csv"),
+                        help="CRSP CIZ monthly file with MthDelFlg (step 6)")
     args = parser.parse_args()
     t0 = time.time()
 
@@ -275,7 +332,7 @@ def main():
     report.append(("check (id, eom) unique", "ok", f"{n:,}"))
 
     drop("drop missing me", "me IS NULL")
-    delist_report = fix_delistings(con, args.delist)
+    delist_report = fix_delistings(con, args.delist, args.delist_flags)
     report.append(("CRSP delisting returns", "fixed", f"{n:,}"))
     no_target = con.execute("SELECT count(*) FROM d WHERE ret_exc_lead1m IS NULL").fetchone()[0]
 

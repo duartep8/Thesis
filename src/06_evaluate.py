@@ -41,8 +41,8 @@ Alphas: long-short returns (gross and net) on Mkt-RF, SMB, HML, RMW, CMA and Mom
 with Newey-West standard errors (6 lags).
 
 Missing returns: delisting returns are in the targets (01_clean.py) and stocks that delist
-during month t are left out of the month-t portfolios; every result is labelled "pending the
-MthDelFlg check" (04_portfolios.RESULT_STATUS). For the few held returns still missing
+during month t are left out of the month-t portfolios (04_portfolios.RESULT_STATUS can label
+every table, e.g. while an input is provisional; unset). For the few held returns still missing
 (baseline: they count as 0), two sensitivities rebuild each setup's
 portfolio from its saved predictions with held missing returns at -30% for all stocks, or
 for distressed stocks only (04_portfolios.py); the weights do not change. For each:
@@ -682,7 +682,8 @@ def main():
     # Save (every table carries the provisional label)
     for t in (summary, tests, alphas, diag, cross, sensitivity):
         if len(t):
-            t.insert(0, "status", p04.RESULT_STATUS)
+            if p04.RESULT_STATUS:
+                t.insert(0, "status", p04.RESULT_STATUS)
     sensitivity.to_csv(tables / f"06_{model}_missing_sensitivity.csv", index=False, float_format="%.6g")
     summary.to_csv(tables / f"06_{model}_summary.csv", index=False, float_format="%.6g")
     tests.to_csv(tables / f"06_{model}_sharpe_tests.csv", index=False, float_format="%.6g")
@@ -694,7 +695,8 @@ def main():
     # Report
     lab = lambda w, f, v: f"{w:<10}{f:<7}{v:>4.2f}"
     num = lambda x, spec, width: f"{'':>{width}}" if pd.isna(x) else f"{x:>{width}{spec}}"
-    print(f"\nAll results {p04.RESULT_STATUS.upper()}.")
+    if p04.RESULT_STATUS:
+        print(f"\nAll results {p04.RESULT_STATUS.upper()}.")
     print(f"\nSummary, return months {months[0]:%Y-%m} to {months[-1]:%Y-%m}; long-short decile, capped value weights, "
           f"stocks delisting in t left out, remaining missing returns = 0\n  {COST_LABEL}. Alphas: FF5 + Mom, Newey-West {NW_LAGS} lags. p: LW bootstrap.")
     print(f"  {'window':<10}{'freq':<7}{'val':>4}{'SR gross':>9}{'SR net':>8}{'mean g':>8}{'mean n':>8}{'cost':>7}"

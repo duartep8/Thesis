@@ -455,7 +455,8 @@ def main():
             first = preds[preds["build_year"] == builds[0]].iloc[0]
             constant = preds.groupby(["freq", "build_year"])["pred"].nunique().eq(1)
             for freq in ("once", "yearly"):
-                row = {"model": model.name, "status": p04.RESULT_STATUS, "window": window_label(window), "val_share": val,
+                row = {"model": model.name, **({"status": p04.RESULT_STATUS} if p04.RESULT_STATUS else {}),
+                       "window": window_label(window), "val_share": val,
                        "freq": freq,
                        "n_fits": 1 if freq == "once" else preds["build_year"].nunique(), "settings": first["settings"],
                        "constant_fits": int(constant.loc[freq].sum())}
@@ -480,7 +481,7 @@ def main():
             merge_table(path, pd.DataFrame(log), ["window", "val_share"]).to_csv(path, index=False, float_format="%.6g")
 
     s0 = summary.iloc[0]
-    print(f"\nSummary ({p04.RESULT_STATUS}), return months {s0['first_ret_month']:%Y-%m} to {s0['last_ret_month']:%Y-%m}; "
+    print(f"\nSummary{f' ({p04.RESULT_STATUS})' if p04.RESULT_STATUS else ''}, return months {s0['first_ret_month']:%Y-%m} to {s0['last_ret_month']:%Y-%m}; "
           "long-short decile portfolio, capped value weights, missing returns = 0")
     print(f"  {'window':<10}{'freq':<7}{'val':>4} {'l1':>4}{'alpha':>9}{'R2 oos':>8}{'IC':>7}{'IC t':>6}"
           f"{'LS mean':>8}{'Sharpe':>7}{'t':>6}{'turnover':>9}  note")
