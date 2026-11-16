@@ -765,8 +765,12 @@ def main():
     print(diag[diag["kind"] == "setup"].drop(columns=["kind", "val_b"], errors="ignore").dropna(axis=1, how="all")
           .to_string(index=False, float_format=lambda x: f"{x:.3g}"))
     print("\nPairs of validation shares: average monthly correlation of predictions, side overlap, LS return correlation")
-    print(diag[diag["kind"] == "pair"].dropna(axis=1, how="all").drop(columns=["kind"])
-          .to_string(index=False, float_format=lambda x: f"{x:.3f}"))
+    pairs = diag[diag["kind"] == "pair"]
+    if pairs.empty:
+        print("  none (only one validation share)")
+    else:
+        print(pairs.dropna(axis=1, how="all").drop(columns=["kind"])
+              .to_string(index=False, float_format=lambda x: f"{x:.3f}"))
     if len(cross):
         print("\nCross-fit diagnostic (a's training part with b's settings; diagnostic only, not a reported setup).")
         print("  Spearman correlation of predictions: original pair; same settings, different training data; "
