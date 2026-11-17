@@ -15,7 +15,9 @@ Each month t, using only month-t data:
     (delisted, from 01_clean.py: the delisting date is known at t and the stock no longer
     trades at eom t; it stays in the universe and the characteristic ranks). Other missing
     ret_exc_lead1m are not known at t, so those stocks stay eligible
-  - sides: sorted by signal, ties broken by id; long the top k, short the bottom k,
+  - sides: sorted by signal, ties broken by a pseudo-random key per stock-month (a hash of
+    id and eom with SEED: the same in every run and setup; not PERMNO order, which is related
+    to firm age); long the top k, short the bottom k,
     k = round(10% of eligible stocks)
   - weights: within each side proportional to min(me, cap), cap = the NYSE 80th percentile
     = the smallest me among size_grp = 'mega' stocks that month; long +1, short -1
@@ -102,8 +104,12 @@ def portfolio(signal, panel, frac=FRAC, missing_return=0.0, missing_scope="all")
     d = d[~d["delisted"].astype(bool)]
     check(d["cap"].notna().all(), "a month has no mega stock, so no cap")
 
-    # Sides: position in the month's sort by signal, ties broken by id
-    d = d.sort_values(["eom", "signal", "id"], kind="mergesort")
+    # Sides: position in the month's sort by signal, ties broken by a seeded hash of (id, eom)
+    # integer keys, so the hash does not depend on the datetime unit of eom
+    key = pd.DataFrame({"id": d["id"].astype("int64").to_numpy(),
+                        "month": (d["eom"].dt.year * 12 + d["eom"].dt.month).astype("int64").to_numpy()})
+    d["tie"] = pd.util.hash_pandas_object(key, index=False, hash_key=f"{SEED:016d}").to_numpy()
+    d = d.sort_values(["eom", "signal", "tie"], kind="mergesort")
     by_month = d.groupby("eom")
     n = by_month["id"].transform("size")
     k = np.floor(frac * n + 0.5)

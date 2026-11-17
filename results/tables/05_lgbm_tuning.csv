@@ -1,0 +1,73 @@
+window,val_share,learning_rate,num_leaves,min_child_samples,n_trees,val_r2,at_cap,n_nonzero,first_pass,rule,chosen,min_distinct,passes_near_constant,near_constant_rule_failed
+5y,0.3,0.05,7,200,33,0.00712255,False,64,,,False,980,True,False
+5y,0.3,0.05,7,1000,57,0.00827519,False,89,,,True,989,True,False
+5y,0.3,0.05,15,200,8,0.00719979,False,44,,,False,755,True,False
+5y,0.3,0.05,15,1000,28,0.00809725,False,104,,,False,989,True,False
+5y,0.3,0.05,31,200,8,0.00747652,False,94,,,False,964,True,False
+5y,0.3,0.05,31,1000,29,0.00801152,False,132,,,False,989,True,False
+5y,0.25,0.05,7,200,8,0.0184687,False,25,,,False,247,True,False
+5y,0.25,0.05,7,1000,38,0.0193161,False,69,,,False,989,True,False
+5y,0.25,0.05,15,200,5,0.0192301,False,39,,,False,318,True,False
+5y,0.25,0.05,15,1000,45,0.0201994,False,121,,,True,989,True,False
+5y,0.25,0.05,31,200,8,0.0193463,False,90,,,False,916,True,False
+5y,0.25,0.05,31,1000,19,0.0196318,False,121,,,False,989,True,False
+5y,0.35,0.05,7,200,56,0.0152038,False,84,,,False,989,True,False
+5y,0.35,0.05,7,1000,46,0.0156015,False,73,,,True,989,True,False
+5y,0.35,0.05,15,200,13,0.0145464,False,69,,,False,969,True,False
+5y,0.35,0.05,15,1000,21,0.0152051,False,85,,,False,989,True,False
+5y,0.35,0.05,31,200,12,0.0145792,False,112,,,False,988,True,False
+5y,0.35,0.05,31,1000,18,0.01502,False,110,,,False,989,True,False
+10y,0.3,0.05,7,200,103,0.00968158,False,118,,,True,989,True,False
+10y,0.3,0.05,7,1000,73,0.00947979,False,92,,,False,989,True,False
+10y,0.3,0.05,15,200,60,0.00934983,False,137,,,False,989,True,False
+10y,0.3,0.05,15,1000,47,0.00947404,False,125,,,False,989,True,False
+10y,0.3,0.05,31,200,35,0.00913862,False,145,,,False,989,True,False
+10y,0.3,0.05,31,1000,19,0.00957783,False,132,,,False,989,True,False
+10y,0.25,0.05,7,200,156,0.0030068,False,135,,,False,989,True,False
+10y,0.25,0.05,7,1000,96,0.00238096,False,103,,,False,989,True,False
+10y,0.25,0.05,15,200,91,0.00324274,False,149,,,True,989,True,False
+10y,0.25,0.05,15,1000,65,0.00245146,False,134,,,False,989,True,False
+10y,0.25,0.05,31,200,60,0.00316743,False,152,,,False,989,True,False
+10y,0.25,0.05,31,1000,60,0.00288072,False,150,,,False,989,True,False
+10y,0.35,0.01,7,200,166,0.00397889,False,92,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,False,989,True,False
+10y,0.35,0.01,7,1000,191,0.00388378,False,100,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,False,989,True,False
+10y,0.35,0.01,15,200,131,0.00399992,False,148,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,False,989,True,False
+10y,0.35,0.01,15,1000,131,0.003993,False,137,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,False,989,True,False
+10y,0.35,0.01,31,200,111,0.00405039,False,153,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,False,989,True,False
+10y,0.35,0.01,31,1000,74,0.00412128,False,150,"[[7, 200, 33, 0.00400676, 967, false], [7, 1000, 27, 0.00394442, 963, false], [15, 200, 33, 0.00394606, 988, false], [15, 1000, 19, 0.00402753, 988, false], [31, 200, 17, 0.00393906, 981, false], [31, 1000, 19, 0.00411203, 989, true]]",triggered: chosen point at learning_rate 0.05 had 19 trees; retuned at 0.01,True,989,True,False
+15y,0.3,0.05,7,200,50,0.0112053,False,63,,,False,989,True,False
+15y,0.3,0.05,7,1000,64,0.0112473,False,68,,,False,989,True,False
+15y,0.3,0.05,15,200,42,0.0114071,False,112,,,False,989,True,False
+15y,0.3,0.05,15,1000,42,0.0114678,False,102,,,True,989,True,False
+15y,0.3,0.05,31,200,29,0.0112342,False,138,,,False,989,True,False
+15y,0.3,0.05,31,1000,27,0.0114201,False,126,,,False,989,True,False
+15y,0.25,0.05,7,200,75,0.00472946,False,88,,,False,989,True,False
+15y,0.25,0.05,7,1000,109,0.00458154,False,100,,,False,989,True,False
+15y,0.25,0.05,15,200,48,0.00479,False,127,,,False,989,True,False
+15y,0.25,0.05,15,1000,58,0.00482032,False,123,,,False,989,True,False
+15y,0.25,0.05,31,200,45,0.00498861,False,145,,,True,989,True,False
+15y,0.25,0.05,31,1000,35,0.00467665,False,140,,,False,989,True,False
+15y,0.35,0.05,7,200,58,0.0140586,False,73,,,False,988,True,False
+15y,0.35,0.05,7,1000,105,0.0138593,False,90,,,False,989,True,False
+15y,0.35,0.05,15,200,32,0.0141621,False,104,,,True,988,True,False
+15y,0.35,0.05,15,1000,52,0.0141001,False,108,,,False,989,True,False
+15y,0.35,0.05,31,200,32,0.0137826,False,140,,,False,988,True,False
+15y,0.35,0.05,31,1000,28,0.0139712,False,132,,,False,989,True,False
+expanding,0.3,0.05,7,200,50,0.0112053,False,63,,,False,989,True,False
+expanding,0.3,0.05,7,1000,64,0.0112473,False,68,,,False,989,True,False
+expanding,0.3,0.05,15,200,42,0.0114071,False,112,,,False,989,True,False
+expanding,0.3,0.05,15,1000,42,0.0114678,False,102,,,True,989,True,False
+expanding,0.3,0.05,31,200,29,0.0112342,False,138,,,False,989,True,False
+expanding,0.3,0.05,31,1000,27,0.0114201,False,126,,,False,989,True,False
+expanding,0.25,0.05,7,200,75,0.00472946,False,88,,,False,989,True,False
+expanding,0.25,0.05,7,1000,109,0.00458154,False,100,,,False,989,True,False
+expanding,0.25,0.05,15,200,48,0.00479,False,127,,,False,989,True,False
+expanding,0.25,0.05,15,1000,58,0.00482032,False,123,,,False,989,True,False
+expanding,0.25,0.05,31,200,45,0.00498861,False,145,,,True,989,True,False
+expanding,0.25,0.05,31,1000,35,0.00467665,False,140,,,False,989,True,False
+expanding,0.35,0.05,7,200,58,0.0140586,False,73,,,False,988,True,False
+expanding,0.35,0.05,7,1000,105,0.0138593,False,90,,,False,989,True,False
+expanding,0.35,0.05,15,200,32,0.0141621,False,104,,,True,988,True,False
+expanding,0.35,0.05,15,1000,52,0.0141001,False,108,,,False,989,True,False
+expanding,0.35,0.05,31,200,32,0.0137826,False,140,,,False,988,True,False
+expanding,0.35,0.05,31,1000,28,0.0139712,False,132,,,False,989,True,False

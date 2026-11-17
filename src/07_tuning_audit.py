@@ -118,25 +118,53 @@ def figures(model, res):
         ax.set_facecolor(SURFACE)
         ax.grid(True, which="major", color=GRID, linewidth=0.6)
         ax.set_axisbelow(True)
-        for i, (l1, g) in enumerate(t.groupby("l1_ratio")):
-            g = g.sort_values("alpha")
-            ax.plot(g["alpha"], g["val_r2"] * 100, color=SERIES[i], linewidth=2, marker=MARKERS[i], markersize=4,
-                    markeredgecolor=SURFACE, markeredgewidth=0.6, label=f"l1_ratio = {l1:g}", zorder=3)
         c = t[t["chosen"]].iloc[0]
-        ax.plot(c["alpha"], c["val_r2"] * 100, marker="o", markersize=11, markerfacecolor="none",
-                markeredgecolor=INK, markeredgewidth=1.6, zorder=4, linestyle="none", label="chosen")
-        ax.text(0.98, 0.04, f"chosen (ring): penalty {c['alpha']:.2e}, l1_ratio {c['l1_ratio']:g}\n"
-                f"validation R² {c['val_r2']:.2%}, {int(c['n_nonzero'])} nonzero coefficients",
-                transform=ax.transAxes, ha="right", va="bottom", fontsize=8, color=INK)
+        rule = ""
+        if model == "lgbm":
+            # x: num_leaves at even spacing; one line per min_child_samples; labels give each point's tree count
+            leaves = sorted(t["num_leaves"].unique())
+            pos = {n: i for i, n in enumerate(leaves)}
+            for i, (mc, g) in enumerate(t.groupby("min_child_samples")):
+                g = g.sort_values("num_leaves")
+                x = g["num_leaves"].map(pos)
+                ax.plot(x, g["val_r2"] * 100, color=SERIES[i], linewidth=2, marker=MARKERS[i], markersize=5,
+                        markeredgecolor=SURFACE, markeredgewidth=0.6, label=f"min_child_samples = {mc}", zorder=3)
+                for xi, r in zip(x, g.itertuples()):
+                    ax.annotate(f"{r.n_trees}", (xi, r.val_r2 * 100), textcoords="offset points", xytext=(6, 4),
+                                fontsize=7, color=INK_2)
+            ax.plot(pos[c["num_leaves"]], c["val_r2"] * 100, marker="o", markersize=12, markerfacecolor="none",
+                    markeredgecolor=INK, markeredgewidth=1.6, zorder=4, linestyle="none", label="chosen")
+            ax.set_xticks(range(len(leaves)), [str(n) for n in leaves])
+            ax.set_xlim(-0.4, len(leaves) - 0.6)
+            ax.text(0.98, 0.04, f"chosen (ring): num_leaves {int(c['num_leaves'])}, min_child_samples "
+                    f"{int(c['min_child_samples'])}\n{int(c['n_trees'])} trees at learning rate {c['learning_rate']:g}, "
+                    f"validation R² {c['val_r2']:.2%}, {int(c['n_nonzero'])} characteristics used",
+                    transform=ax.transAxes, ha="right", va="bottom", fontsize=8, color=INK)
+            ax.set_xlabel("num_leaves (labels: trees chosen by early stopping)")
+            title = "LightGBM tuning"
+            if isinstance(c.get("rule"), str) and c["rule"]:
+                rule = f" Edge rule {c['rule']}."
+        else:
+            for i, (l1, g) in enumerate(t.groupby("l1_ratio")):
+                g = g.sort_values("alpha")
+                ax.plot(g["alpha"], g["val_r2"] * 100, color=SERIES[i], linewidth=2, marker=MARKERS[i], markersize=4,
+                        markeredgecolor=SURFACE, markeredgewidth=0.6, label=f"l1_ratio = {l1:g}", zorder=3)
+            ax.plot(c["alpha"], c["val_r2"] * 100, marker="o", markersize=11, markerfacecolor="none",
+                    markeredgecolor=INK, markeredgewidth=1.6, zorder=4, linestyle="none", label="chosen")
+            ax.text(0.98, 0.04, f"chosen (ring): penalty {c['alpha']:.2e}, l1_ratio {c['l1_ratio']:g}\n"
+                    f"validation R² {c['val_r2']:.2%}, {int(c['n_nonzero'])} nonzero coefficients",
+                    transform=ax.transAxes, ha="right", va="bottom", fontsize=8, color=INK)
+            ax.set_xscale("log")
+            ax.set_xlabel("penalty (alpha), log scale")
+            title = "Elastic net tuning"
         ax.axhline(0, color=INK_2, linewidth=0.8, zorder=2)
-        ax.set_xscale("log")
-        ax.set_xlabel("penalty (alpha), log scale")
         ax.set_ylabel("validation R² (%)")
         same = " (same December 1989 tuning as the 15-year window)" if w == "expanding" else (
             " (same December 1989 tuning as the expanding window)" if w == "15y" else "")
-        ax.set_title(f"Elastic net tuning: {w} window, validation share {v:.0%}", loc="left", fontsize=10, color=INK)
-        fig.text(0.01, 0.01, f"Fit of December 1989; validation R² without demeaning{same}.", fontsize=7, color=INK_2)
-        ax.legend(frameon=False, fontsize=8, loc="upper left")
+        ax.set_title(f"{title}: {w} window, validation share {v:.0%}", loc="left", fontsize=10, color=INK)
+        fig.text(0.01, 0.01, f"Fit of December 1989; validation R² without demeaning{same}.{rule}", fontsize=7,
+                 color=INK_2, wrap=True)
+        ax.legend(frameon=False, fontsize=8, loc="lower left" if model == "lgbm" else "upper left")
         fig.tight_layout(rect=(0, 0.03, 1, 1))
         path = out / f"07_{model}_tuning_{w}_val{round(v * 100)}.png"
         fig.savefig(path, facecolor=SURFACE)

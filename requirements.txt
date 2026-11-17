@@ -6,3 +6,5 @@ scikit-learn==1.9.1
 scipy==1.18.1
 statsmodels==0.15.0
 matplotlib==3.11.2
+lightgbm==4.7.0
+threadpoolctl==3.7.0

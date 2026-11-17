@@ -28,6 +28,43 @@ how training choices and retraining affect forecasts and portfolio performance.
   The model is fit on the training part only.
 - Hyperparameters: Part 1, tuned separately for each window setup (at its first fit).
   Part 2, tuned once and then fixed.
+- Target and predictions, all models (`05_train.py`; changed 2026-11-16, see below):
+  - Every model is fit, tuned and early-stopped on `ret_exc_lead1m` minus that month's
+    cross-sectional mean over universe rows with a target.
+  - Predictions: the model's output minus its mean within each month (over all universe
+    rows, known at t), plus c = the average raw return of the build's training rows (known at
+    the December build date). The cross-sectional part is pure ranking; portfolios are
+    unaffected by the monthly shift; R² keeps its definition (1 − Σ(y − f)²/Σy², raw y).
+  - Validation R² is computed the same way (predictions demeaned within each validation
+    month, plus c), and it ranks grid points and drives LightGBM's early stopping.
+  - Models cannot time the market by construction (unlike Gu, Kelly & Xiu's).
+- Near-constant rule, all models, pre-committed 2026-11-16 before any run under it: a grid
+  point qualifies only if its validation predictions take at least 50 distinct values in
+  every validation month. The best qualifying point by validation R² is chosen. If none
+  qualifies (in the final pass), the point with the most distinct predictions is taken
+  (then by validation R²) and the setup is flagged `near_constant_rule_failed`. For LightGBM
+  this comes before the tree-count edge rule, and again after its rerun. Not a rule but
+  reported: distinct predictions per test month for every fit and setup.
+- Protocol change, 2026-11-16, after the first LightGBM run (archived with a README in
+  `results/tables/archive/lgbm_v1_raw_target/`): trained on the raw target, LightGBM used
+  tied ranks of discrete characteristics (`ni_inc8q`, `f_score`), whose tied value differs by
+  month, as a month label to fit monthly market returns (`ni_inc8q` 65–80% of gain;
+  several 5y/10y fits with 1–13 trees and 3–5 distinct predictions per month). The change
+  (demeaned target and predictions, near-constant rule, random tie-break) answers this
+  mechanism in the training data, not test performance; it applies to all models, and the
+  elastic net is refit under it.
+- LightGBM (`05_train.py --model lgbm`): squared loss, learning rate 0.05, bagging 0.8
+  every iteration, seed 42, deterministic, 8 threads. Grid num_leaves {7, 15, 31} ×
+  min_child_samples {200, 1000}; at the first fit (December 1989) each point is fit on the
+  training part with early stopping on the validation part (at most 1,000 trees, 50 rounds
+  without improvement); the point with the highest validation R² wins, and its best
+  iteration is n_trees (validation R² as defined above; near-constant rule first). Settings,
+  n_trees included, are then fixed; refits use the training part only, with exactly n_trees trees.
+  - Edge rule, pre-committed before any LightGBM result was seen (2026-11-16), applied
+    once per setup at the December 1989 tuning: if the chosen point's n_trees is below 20,
+    rerun the whole tuning grid at learning rate 0.01; if it reaches the 1,000 cap, rerun
+    it at 0.1. The rerun's best point by validation R² is chosen. The trigger and the first
+    pass are logged in `05_lgbm_tuning.csv` (`rule`, `first_pass`).
 - Part 2 (A vs C, value of retraining): for all three models, in the expanding,
   yearly-retrained setup, over return months 1991–2025. C = this December's refit on
   all data so far; A = last December's model, unchanged. No extra fits needed: each
@@ -136,6 +173,9 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Characteristics: JKP's 153, ranked each month across the universe to [−1, 1];
   missing values = 0 (the median), following Gu, Kelly & Xiu (2020). No winsorizing.
 - Universe: the 1,000 largest stocks by `me` each month.
+- Portfolio sort (`04_portfolios.py`): ties in the signal are broken by a seeded hash of
+  (PERMNO, month), not by PERMNO order (related to firm age). Ties are rare for the elastic
+  net (0.05% of predictions; a decile boundary falls in a tie in at most 0.23% of months).
 - Suspect returns: `ret_exc_lead1m` ≤ −0.90 while the stock's `me` in t+1 is at least
   50% of its `me` in t. The original is kept in `ret_exc_lead1m_raw`, the row is
   flagged in `ret_exc_lead1m_suspect`, and `ret_exc_lead1m` is set to missing: dropped

@@ -91,7 +91,7 @@ WINDOW_ORDER = ["5y", "10y", "15y", "expanding"]
 FREQS = ["once", "yearly"]
 VAL_PAIRS = [(0.25, 0.30), (0.30, 0.35), (0.25, 0.35)]
 REFERENCE = ("expanding", "yearly", 0.30)
-SIZE_COLUMN = {"enet": "n_nonzero"}  # model size logged by 05_train.py in 05_<model>_fits.csv
+SIZE_COLUMN = {"enet": "n_nonzero", "lgbm": "n_nonzero"}  # model size in 05_<model>_fits.csv (lgbm: characteristics used)
 COST_LABEL = "net = after half-spread costs from bidaskhl_21d, an upper bound on costs"
 # Held missing returns: (label, value, scope) for 04_portfolios.portfolio; the first is the baseline
 MISSING_VERSIONS = [("baseline", 0.0, "all"), ("m30_all", -0.30, "all"), ("m30_distressed", -0.30, "distressed")]

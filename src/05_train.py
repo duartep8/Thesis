@@ -1,7 +1,7 @@
 """Step 5: train return models over the grid of window x validation share x frequency.
 
 Usage:
-    python src/05_train.py --model enet [--windows 5 10 15 expanding] [--val 0.30 0.25 0.35]
+    python src/05_train.py --model enet|lgbm [--windows 5 10 15 expanding] [--val 0.30 0.25 0.35]
                            [--test-start 1990] [--test-end 2025] [--cross-fit] [--refit]
                            [--panel data/panel.parquet] [--clean data/clean.parquet] [--out results]
 
@@ -21,7 +21,7 @@ Settings are tuned by validation R^2 (Gu, Kelly & Xiu 2020, no demeaning) at a s
 first fit and kept for its later refits. Fits with identical data and settings are run
 once (e.g. the 15-year and expanding windows in December 1989).
 
-Each model class has tune(), fit(), predict() and save(); add LightGBM and the neural
+Each model class has tune(), fit(), predict() and save() (models: enet, lgbm); add the neural
 network to MODELS. Outputs (an existing predictions file is not refit, only evaluated):
   results/predictions/<model>/<window>_val<share>.parquet  both frequencies, ages 0 and 1
   results/predictions/<model>/<window>_val<share>.manifest.json  its provenance
@@ -88,6 +88,48 @@ def r2_oos(y, f):
     return 1.0 - np.sum((y - f) ** 2) / np.sum(y ** 2)
 
 
+# Near-constant rule (CLAUDE.md, pre-committed 2026-11-16): a grid point qualifies only if its
+# validation predictions take at least MIN_DISTINCT distinct values in every validation month.
+MIN_DISTINCT = 50
+
+
+def demean_by_month(f, months):
+    """f minus its mean within each month (months: integer month index per row)."""
+    codes, inv = np.unique(months, return_inverse=True)
+    return f - (np.bincount(inv, weights=f) / np.bincount(inv))[inv]
+
+
+def distinct_per_month(f, months):
+    """Number of distinct values of f in each month (array over the months present)."""
+    order = np.lexsort((f, months))
+    fs, ms = f[order], months[order]
+    new = np.ones(len(f), bool)
+    new[1:] = (fs[1:] != fs[:-1]) | (ms[1:] != ms[:-1])
+    _, counts = np.unique(ms[new], return_counts=True)
+    return counts
+
+
+def validation_scorer(y_raw, months, c):
+    """Validation R^2 as reported: predictions demeaned within each month plus the constant c
+    (the training part's average return), against the raw target; and the near-constant test."""
+    return {"r2": lambda f: r2_oos(y_raw, demean_by_month(f, months) + c),
+            "min_distinct": lambda f: int(distinct_per_month(f, months).min())}
+
+
+def choose(rows):
+    """Best validation R^2 among grid points passing the near-constant rule; if none passes, the
+    point with the most distinct predictions (then validation R^2), flagged. Marks rows in place."""
+    for r in rows:
+        r["passes_near_constant"] = r["min_distinct"] >= MIN_DISTINCT
+    passing = [r for r in rows if r["passes_near_constant"]]
+    best = (max(passing, key=lambda r: r["val_r2"]) if passing
+            else max(rows, key=lambda r: (r["min_distinct"], r["val_r2"])))
+    for r in rows:
+        r["chosen"] = r is best
+        r["near_constant_rule_failed"] = not passing
+    return best
+
+
 class ElasticNet:
     """Elastic net with an intercept (scikit-learn's objective). Settings: l1_ratio, alpha."""
     name = "enet"
@@ -95,7 +137,8 @@ class ElasticNet:
     N_ALPHAS, ALPHA_RANGE = 30, 1e-4  # alphas from the all-zero value down to 1e-4 of it, log-spaced
     MAX_ITER, TOL = 100_000, 1e-6
 
-    def tune(self, X_tr, y_tr, X_va, y_va, seed):
+    def tune(self, X_tr, y_tr, X_va, y_va, seed, val):
+        """y_tr, y_va: month-demeaned targets; val: validation_scorer (R^2 as reported, distinct values)."""
         from sklearn.linear_model import enet_path
 
         x_mean, y_mean = X_tr.mean(axis=0), y_tr.mean()
@@ -109,8 +152,9 @@ class ElasticNet:
                                          max_iter=self.MAX_ITER, tol=self.TOL)
             for a, c in zip(alphas, coefs.T):
                 f = y_mean + (X_va - x_mean) @ c
-                rows.append({"l1_ratio": l1, "alpha": float(a), "val_r2": r2_oos(y_va, f), "n_nonzero": int((c != 0).sum())})
-        best = max(rows, key=lambda r: r["val_r2"])
+                rows.append({"l1_ratio": l1, "alpha": float(a), "val_r2": val["r2"](f),
+                             "min_distinct": val["min_distinct"](f), "n_nonzero": int((c != 0).sum())})
+        best = choose(rows)
         return {"l1_ratio": best["l1_ratio"], "alpha": best["alpha"]}, rows
 
     def fit(self, X, y, settings, seed):
@@ -131,7 +175,98 @@ class ElasticNet:
         coef.to_csv(path.with_suffix(".csv"), index=False)
 
 
-MODELS = {"enet": ElasticNet}
+class LightGBM:
+    """Gradient-boosted trees (LightGBM), squared loss. Settings: num_leaves, min_child_samples,
+    learning_rate, n_trees.
+
+    Tuning (first fit only): each grid point is fit on the training part with early stopping on
+    the validation part's squared error (the same ranking as validation R^2), at most MAX_TREES
+    trees and EARLY_STOPPING rounds without improvement; the grid point with the highest
+    validation R^2 at its best iteration is chosen, and its best iteration is n_trees.
+    Pre-committed edge rule (CLAUDE.md), applied once: if the chosen point's n_trees is below
+    MIN_TREES, the tuning is rerun at LR_FEW_TREES; if it reaches MAX_TREES, at LR_AT_CAP; the
+    rerun's best point by validation R^2 is chosen, and the tuning rows record the trigger and
+    the first pass. Refits use the training part only, with exactly n_trees trees.
+    """
+    name = "lgbm"
+    NUM_LEAVES = [7, 15, 31]
+    MIN_CHILD_SAMPLES = [200, 1000]
+    LEARNING_RATE = 0.05
+    MAX_TREES, EARLY_STOPPING = 1000, 50
+    BAGGING_FRACTION, BAGGING_FREQ = 0.8, 1
+    NUM_THREADS = 8  # deterministic=True reproduces results only at a fixed thread count
+    MIN_TREES, LR_FEW_TREES, LR_AT_CAP = 20, 0.01, 0.1
+
+    def params(self, num_leaves, min_child_samples, learning_rate, seed):
+        return {"objective": "regression", "learning_rate": learning_rate, "num_leaves": num_leaves,
+                "min_child_samples": min_child_samples, "bagging_fraction": self.BAGGING_FRACTION,
+                "bagging_freq": self.BAGGING_FREQ, "seed": seed, "deterministic": True, "force_col_wise": True,
+                "num_threads": self.NUM_THREADS, "verbose": -1}
+
+    def grid(self, X_tr, y_tr, X_va, y_va, learning_rate, seed, val):
+        import lightgbm as lgb
+
+        # early stopping on the reported validation R^2 (demeaned within month, plus the constant)
+        feval = lambda preds, _: ("val_r2", val["r2"](preds), True)
+        rows = []
+        for nl in self.NUM_LEAVES:
+            for mc in self.MIN_CHILD_SAMPLES:
+                p = dict(self.params(nl, mc, learning_rate, seed), metric="None")
+                d_tr = lgb.Dataset(X_tr, y_tr, params=p)
+                d_va = lgb.Dataset(X_va, y_va, reference=d_tr, params=p)
+                booster = lgb.train(p, d_tr, num_boost_round=self.MAX_TREES, valid_sets=[d_va], feval=feval,
+                                    callbacks=[lgb.early_stopping(self.EARLY_STOPPING, verbose=False)])
+                best = int(booster.best_iteration)
+                f = booster.predict(X_va, num_iteration=best)
+                used = booster.feature_importance("split", iteration=best) > 0
+                rows.append({"learning_rate": learning_rate, "num_leaves": nl, "min_child_samples": mc, "n_trees": best,
+                             "val_r2": val["r2"](f), "min_distinct": val["min_distinct"](f),
+                             "at_cap": best >= self.MAX_TREES, "n_nonzero": int(used.sum())})
+        return rows
+
+    def tune(self, X_tr, y_tr, X_va, y_va, seed, val):
+        """y_tr, y_va: month-demeaned targets; val: validation_scorer (R^2 as reported, distinct values).
+        Near-constant rule first (choose), then the tree-count edge rule on the chosen point."""
+        rows = self.grid(X_tr, y_tr, X_va, y_va, self.LEARNING_RATE, seed, val)
+        best = choose(rows)
+        rule = ""
+        if best["n_trees"] < self.MIN_TREES or best["n_trees"] >= self.MAX_TREES:
+            lr = self.LR_FEW_TREES if best["n_trees"] < self.MIN_TREES else self.LR_AT_CAP
+            rule = (f"triggered: chosen point at learning_rate {self.LEARNING_RATE:g} had {best['n_trees']} trees; "
+                    f"retuned at {lr:g}")
+            first = json.dumps([[r["num_leaves"], r["min_child_samples"], r["n_trees"], round(r["val_r2"], 8),
+                                 r["min_distinct"], r["chosen"]] for r in rows])
+            rows = self.grid(X_tr, y_tr, X_va, y_va, lr, seed, val)
+            for r in rows:
+                r["first_pass"] = first
+            best = choose(rows)
+        for r in rows:
+            r["rule"] = rule
+        settings = {k: best[k] for k in ("num_leaves", "min_child_samples", "learning_rate", "n_trees")}
+        return settings, rows
+
+    def fit(self, X, y, settings, seed):
+        import lightgbm as lgb
+
+        p = self.params(settings["num_leaves"], settings["min_child_samples"], settings["learning_rate"], seed)
+        return lgb.train(p, lgb.Dataset(X, y, params=p), num_boost_round=settings["n_trees"])
+
+    def predict(self, model, X):
+        pred = model.predict(X)
+        check(np.ptp(pred) > 0, "LightGBM fit predicts a constant")
+        return pred
+
+    def n_nonzero(self, model):
+        """Characteristics used in at least one split."""
+        return int((model.feature_importance("split") > 0).sum())
+
+    def save(self, model, path, chars):
+        model.save_model(str(path.with_suffix(".txt")))
+        pd.DataFrame({"name": chars, "gain": model.feature_importance("gain"),
+                      "split": model.feature_importance("split")}).to_csv(path.with_suffix(".csv"), index=False)
+
+
+MODELS = {"enet": ElasticNet, "lgbm": LightGBM}
 
 
 def load_data(panel, chars):
@@ -141,7 +276,10 @@ def load_data(panel, chars):
     df = df.sort_values(["eom", "id"], ignore_index=True)
     df["ret_month"] = df["eom"] + pd.offsets.MonthEnd(1)
     m_idx = month_index(df["ret_month"])
+    # training target: minus the month's cross-sectional mean over universe rows with a target
+    y_dm = df["ret_exc_lead1m"] - df.groupby("eom")["ret_exc_lead1m"].transform("mean")
     data = {"X": df[chars].to_numpy(np.float64), "y": df["ret_exc_lead1m"].to_numpy(np.float64),
+            "y_dm": y_dm.to_numpy(np.float64),
             "has_y": df["ret_exc_lead1m"].notna().to_numpy(), "m_idx": m_idx, "first_idx": int(m_idx.min()),
             "ret_year": df["ret_month"].dt.year.to_numpy(), "id": df["id"].to_numpy(), "eom": df["eom"].to_numpy(),
             "ret_month": df["ret_month"].to_numpy(), "chars": chars}
@@ -183,7 +321,8 @@ def expected_manifest(model, run, window, val, fixed_settings=None):
             "test_start": run["test_start"], "test_end": run["test_end"], "panel_sha256": run["panel_sha256"],
             "characteristics": run["chars"],
             "model_grid": {k: v for k, v in vars(type(model)).items() if k.isupper()}, "seed": SEED,
-            "packages": {"numpy": np.__version__, "pandas": pd.__version__, "scikit-learn": sklearn.__version__},
+            "packages": {"numpy": np.__version__, "pandas": pd.__version__, "scikit-learn": sklearn.__version__,
+                         **({"lightgbm": __import__("lightgbm").__version__} if model.name == "lgbm" else {})},
             "training_code_sha256": run["code_sha256"], "fixed_settings": fixed_settings}
 
 
@@ -290,8 +429,12 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
     """Fit one (window, validation share) over all build years; returns its predictions.
 
     fixed_settings: use these settings instead of tuning (diagnostic refits, saved with tag).
+    Models are fit and tuned on the month-demeaned target (y_dm). Predictions: the model's output
+    minus its mean within each month (over all universe rows, known at t), plus c = the average raw
+    return of the build's training rows (known at the build date).
     """
-    X, y, has_y, m_idx, ret_year, first_idx = (data[k] for k in ("X", "y", "has_y", "m_idx", "ret_year", "first_idx"))
+    X, y, y_dm, has_y, m_idx, ret_year, first_idx = (
+        data[k] for k in ("X", "y", "y_dm", "has_y", "m_idx", "ret_year", "first_idx"))
     name = setup_name(window, val) + tag
     model_dir = out / "models" / model.name / ("diagnostic" if fixed_settings is not None else "")
     settings, parts = fixed_settings, []
@@ -305,21 +448,23 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
         tr = has_y & (m_idx >= lo) & (m_idx <= split)
         va = has_y & (m_idx > split) & (m_idx <= hi)
         check(m_idx[tr | va].max() <= hi, "look-ahead: a training return after the build month")
+        c = float(y[tr].mean())
 
         if settings is None:
             key = ("tune", lo, split, hi)
             if key not in cache:
-                cache[key] = model.tune(X[tr], y[tr], X[va], y[va], SEED)
+                cache[key] = model.tune(X[tr], y_dm[tr], X[va], y_dm[va], SEED, validation_scorer(y[va], m_idx[va], c))
             settings, rows = cache[key]
-            best = max(rows, key=lambda r: r["val_r2"])
-            tuning_log += [{"window": window_label(window), "val_share": val, **r, "chosen": r is best} for r in rows]
+            tuning_log += [{"window": window_label(window), "val_share": val, **r} for r in rows]
         key = ("fit", lo, split, hi, json.dumps(settings, sort_keys=True))
         if key not in cache:
-            cache[key] = model.fit(X[tr], y[tr], settings, SEED)
+            cache[key] = model.fit(X[tr], y_dm[tr], settings, SEED)
         fitted = cache[key]
         model.save(fitted, model_dir / f"{name}_{b}", data["chars"])
 
-        pred = model.predict(fitted, X).astype("float32")
+        pred = (demean_by_month(model.predict(fitted, X), m_idx) + c).astype("float32")
+        test0 = ret_year == b + 1
+        dist = distinct_per_month(pred[test0], m_idx[test0]) if test0.any() else np.array([0])
         settings_json = json.dumps(settings, sort_keys=True)
 
         def frame(sel, freq):
@@ -335,10 +480,13 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
             parts.append(frame((ret_year > b) & (ret_year <= test_end), "once"))
         fit_log.append({"window": window_label(window), "val_share": val, "build_year": b,
                         "train_months": split - lo + 1, "val_months": n_val, "n_train": int(tr.sum()), "n_val": int(va.sum()),
-                        "val_r2": r2_oos(y[va], pred[va]), "n_nonzero": model.n_nonzero(fitted), "seconds": time.time() - t0})
+                        "val_r2": r2_oos(y[va], pred[va]), "n_nonzero": model.n_nonzero(fitted), "constant": c,
+                        "distinct_test_median": float(np.median(dist)), "distinct_test_min": int(dist.min()),
+                        "seconds": time.time() - t0})
         f = fit_log[-1]
         print(f"  {name} build {b}: train {f['train_months']} months ({f['n_train']:,} rows), val {n_val} months, "
-              f"val R2 {f['val_r2']:.4f}, {f['n_nonzero']} nonzero, {f['seconds']:.1f}s", flush=True)
+              f"val R2 {f['val_r2']:.4f}, {f['n_nonzero']} nonzero, distinct preds/month in {b + 1} "
+              f"min {f['distinct_test_min']}, {f['seconds']:.1f}s", flush=True)
     return pd.concat(parts, ignore_index=True)
 
 
@@ -402,6 +550,23 @@ def cross_fit(model, data, args, builds, out, run):
             path, index=False, float_format="%.6g")
 
 
+def importance_table(out, build, windows, vals, top=20):
+    """Top characteristics by gain at the first fit, per setup: results/tables/05_lgbm_importance_<build>.csv."""
+    rows = []
+    for window in windows:
+        for val in vals:
+            f = out / "models" / "lgbm" / f"{setup_name(window, val)}_{build}.csv"
+            if not f.exists():
+                continue
+            imp = pd.read_csv(f)
+            imp["gain_share"] = imp["gain"] / imp["gain"].sum()
+            imp = imp.sort_values(["gain", "name"], ascending=[False, True]).head(top)
+            rows.append(imp.assign(window=window_label(window), val_share=val, rank=range(1, len(imp) + 1)))
+    if rows:
+        t = pd.concat(rows)[["window", "val_share", "rank", "name", "gain_share", "split"]]
+        t.to_csv(out / "tables" / f"05_lgbm_importance_{build}.csv", index=False, float_format="%.6g")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--model", choices=list(MODELS), default="enet")
@@ -461,34 +626,55 @@ def main():
                        "n_fits": 1 if freq == "once" else preds["build_year"].nunique(), "settings": first["settings"],
                        "constant_fits": int(constant.loc[freq].sum())}
                 row.update(evaluate(p04, pf_panel, preds, target, model.name, name, freq, out))
+                p = preds[(preds["freq"] == freq) & ((preds["age"] == 0) if freq == "yearly" else True)]
+                row["pred_sd"] = p["pred"].std()  # pooled over the test months
+                row["pred_sd_cs"] = p.groupby("ret_month")["pred"].std().mean()  # average cross-sectional sd
+                dist = p.groupby("ret_month")["pred"].nunique()  # distinct predictions per test month
+                row["distinct_median"], row["distinct_min"] = float(dist.median()), int(dist.min())
                 summary.append(row)
             once = preds[preds["freq"] == "once"].sort_values(["eom", "id"])
             once_preds[(window_label(window), val)] = once["pred"].to_numpy()
 
     summary = pd.DataFrame(summary)
     summary["note"] = np.where(summary["constant_fits"] > 0,
-                               summary["constant_fits"].astype(str) + " fit(s) predict a constant (all coefficients 0); ", "")
+                               summary["constant_fits"].astype(str) + " fit(s) predict a constant; ", "")
     for val in args.val:
         a, b = once_preds.get(("15y", val)), once_preds.get(("expanding", val))
         if a is not None and b is not None and np.array_equal(a, b):
             summary.loc[(summary["freq"] == "once") & (summary["val_share"] == val)
                         & summary["window"].isin(["15y", "expanding"]), "note"] += "15y = expanding (same Dec 1989 fit)"
     tables = out / "tables"
-    summary.to_csv(tables / f"05_{model.name}_summary.csv", index=False, float_format="%.6g")
     if fit_log:
         for kind, log in (("fits", fit_log), ("tuning", tuning_log)):
             path = tables / f"05_{model.name}_{kind}.csv"
             merge_table(path, pd.DataFrame(log), ["window", "val_share"]).to_csv(path, index=False, float_format="%.6g")
+    # near-constant rule per setup, from the tuning table (grid points failing it; fallback used)
+    tun = pd.read_csv(tables / f"05_{model.name}_tuning.csv")
+    tun["val_share"] = tun["val_share"].round(4)
+    nc = tun.groupby(["window", "val_share"]).agg(grid_points=("val_r2", "size"),
+                                                   grid_failed_near_constant=("passes_near_constant", lambda x: int((~x.astype(bool)).sum())),
+                                                   near_constant_rule_failed=("near_constant_rule_failed", "any")).reset_index()
+    summary["val_share"] = summary["val_share"].round(4)
+    summary = summary.merge(nc, on=["window", "val_share"], how="left")
+    summary.loc[summary["near_constant_rule_failed"].fillna(False).astype(bool), "note"] += "near-constant rule failed (fallback); "
+    summary.to_csv(tables / f"05_{model.name}_summary.csv", index=False, float_format="%.6g")
+
+    if model.name == "lgbm":
+        importance_table(out, builds[0], args.windows, args.val)
 
     s0 = summary.iloc[0]
     print(f"\nSummary{f' ({p04.RESULT_STATUS})' if p04.RESULT_STATUS else ''}, return months {s0['first_ret_month']:%Y-%m} to {s0['last_ret_month']:%Y-%m}; "
           "long-short decile portfolio, capped value weights, missing returns = 0")
-    print(f"  {'window':<10}{'freq':<7}{'val':>4} {'l1':>4}{'alpha':>9}{'R2 oos':>8}{'IC':>7}{'IC t':>6}"
-          f"{'LS mean':>8}{'Sharpe':>7}{'t':>6}{'turnover':>9}  note")
+    print(f"  {'window':<10}{'freq':<7}{'val':>4} {'settings':<34}{'R2 oos':>8}{'IC':>7}{'IC t':>6}"
+          f"{'LS mean':>8}{'Sharpe':>7}{'t':>6}{'turnover':>9}{'pred sd':>9}{'dist md':>8}{'min':>6}{'fail':>8}  note")
     for r in summary.itertuples():
-        st = json.loads(r.settings)
-        print(f"  {r.window:<10}{r.freq:<7}{r.val_share:>4.2f} {st.get('l1_ratio', ''):>4}{st.get('alpha', 0):>9.2e}"
-              f"{r.oos_r2:>8.2%}{r.ic_mean:>7.3f}{r.ic_t:>6.1f}{r.ls_mean:>8.2%}{r.sharpe:>7.2f}{r.t:>6.2f}{r.turnover:>9.0%}  {r.note}")
+        st = ", ".join(f"{k} {v:.3g}" if isinstance(v, float) else f"{k} {v}" for k, v in json.loads(r.settings).items())
+        print(f"  {r.window:<10}{r.freq:<7}{r.val_share:>4.2f} {st:<34}"
+              f"{r.oos_r2:>8.2%}{r.ic_mean:>7.3f}{r.ic_t:>6.1f}{r.ls_mean:>8.2%}{r.sharpe:>7.2f}{r.t:>6.2f}{r.turnover:>9.0%}"
+              f"{r.pred_sd_cs:>9.4f}{r.distinct_median:>8.0f}{r.distinct_min:>6}{r.grid_failed_near_constant:>4.0f}/{r.grid_points:<3.0f}  {r.note}")
+    print("  pred sd: average cross-sectional standard deviation of the predictions; distinct: distinct predictions per "
+          f"test month (median, min); last: grid points failing the near-constant rule (< {MIN_DISTINCT} distinct "
+          "validation predictions in a month) / grid points")
     print(f"\nSaved {tables}/05_{model.name}_summary.csv; done in {time.time() - t_start:,.0f}s")
 
 

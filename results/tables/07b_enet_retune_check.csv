@@ -1,3 +1,3 @@
-window,val_share,chosen_alpha,chosen_l1_ratio,chosen_val_r2,chosen_n_nonzero,ours_alpha,ours_l1_ratio,ours_val_r2,same_choice,max_grid_alpha_rel_diff,max_grid_val_r2_abs_diff,same_nonzero_share,same_rank_share,gap_best_to_second
-10y,0.3,0.0063095348,0.1,0.0085372448,15,0.00630953,0.1,0.00853724,True,3.8157865e-06,4.4970337e-08,1,1,1.8661447e-06
-expanding,0.3,0.0070676244,0.1,0.010270408,14,0.00706762,0.1,0.0102704,True,4.3754474e-06,5.1437509e-08,1,1,9.1535336e-06
+window,val_share,chosen_alpha,chosen_l1_ratio,chosen_val_r2,chosen_n_nonzero,ours_alpha,ours_l1_ratio,ours_val_r2,same_choice,max_grid_alpha_rel_diff,max_grid_val_r2_abs_diff,same_nonzero_share,same_rank_share,gap_best_to_second,max_n_iter,n_not_converged
+10y,0.3,0.0012618505,0.5,0.008553038,15,0.00126185,0.5,0.00855304,True,4.9047736e-06,7.7566032e-08,1,1,2.1830224e-07,2051,0
+expanding,0.3,0.0070626257,0.1,0.010268884,14,0.00706263,0.1,0.0102689,True,4.327048e-06,5.2582671e-08,1,1,2.6153172e-06,2613,0
