@@ -2,6 +2,10 @@
 
 Usage:
     python src/07_tuning_audit.py [--model enet] [--panel data/panel.parquet] [--results results]
+                                  [--test-end 2025]
+
+Audits the windows and validation shares present in 05_<model>_summary.csv; --test-end
+must be the last test year 05 was run with (once-trained fits are checked to predict up to it).
 
 1. Sample-split table. For every setup, the training, validation and test months of
    its fits, rederived from the design (windows by return month; validation = the last
@@ -32,7 +36,6 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parent.parent
 FIRST_RETURN = pd.Period("1975-01", "M")
-TEST_START, TEST_END = 1990, 2025
 WINDOW_ORDER = ["5y", "10y", "15y", "expanding"]
 # Reference categorical palette (validated: scripts/validate_palette.js, light surface); each line also
 # has its own marker shape, so identity never rests on colour alone
@@ -58,7 +61,7 @@ def fmt(months):
     return f"{months[0]:%Y-%m} to {months[-1]:%Y-%m}"
 
 
-def audit(model, res, panel):
+def audit(model, res, panel, test_end):
     rows_per_month = panel[panel["ret_exc_lead1m"].notna()].groupby("ret_month").size()
     fits = pd.read_csv(res / "tables" / f"05_{model}_fits.csv")
     fits["val_share"] = fits["val_share"].round(2)
@@ -66,7 +69,7 @@ def audit(model, res, panel):
     summary["val_share"] = summary["val_share"].round(2)
     target = panel.set_index(["id", "eom"])["ret_exc_lead1m"]
     builds_out, setups_out = [], []
-    for w in WINDOW_ORDER:
+    for w in [w for w in WINDOW_ORDER if w in set(summary["window"])]:
         for v in sorted(summary["val_share"].unique()):
             preds = pd.read_parquet(res / "predictions" / model / f"{w}_val{round(v * 100)}.parquet",
                                     columns=["id", "eom", "ret_month", "freq", "build_year", "age", "settings"])
@@ -81,7 +84,7 @@ def audit(model, res, panel):
                 for b, pb in p.groupby("build_year"):
                     tr, va = split(w, v, b)
                     test = pd.PeriodIndex(sorted(pb["rm"].unique()))
-                    expected = pd.period_range(f"{b + 1}-01", f"{b + 1 if freq == 'yearly' else TEST_END}-12", freq="M")
+                    expected = pd.period_range(f"{b + 1}-01", f"{b + 1 if freq == 'yearly' else test_end}-12", freq="M")
                     log = fits[(fits["window"] == w) & (fits["val_share"] == v) & (fits["build_year"] == b)].iloc[0]
                     n_tr, n_va = int(rows_per_month.reindex(tr).sum()), int(rows_per_month.reindex(va).sum())
                     r = {"window": w, "freq": freq, "val_share": v, "build_year": b,
@@ -178,13 +181,14 @@ def main():
     parser.add_argument("--model", default="enet")
     parser.add_argument("--panel", default=str(ROOT / "data" / "panel.parquet"))
     parser.add_argument("--results", default=str(ROOT / "results"))
+    parser.add_argument("--test-end", type=int, default=2025, help="last test year of the 05 run (default 2025)")
     args = parser.parse_args()
     res = Path(args.results)
 
     panel = pd.read_parquet(args.panel, columns=["id", "eom", "ret_exc_lead1m"])
     panel["eom"] = pd.to_datetime(panel["eom"])
     panel["ret_month"] = (panel["eom"] + pd.offsets.MonthEnd(1)).dt.to_period("M")
-    setups, builds = audit(args.model, res, panel)
+    setups, builds = audit(args.model, res, panel, args.test_end)
     cols = ["window", "freq", "val_share", "train", "val", "test", "train_months", "val_months", "test_months",
             "n_train", "n_val", "n_test", "n_test_with_target", "fits", "last_fit_val_end", "last_fit_test",
             "matches_05_log", "no_overlap", "val_before_test", "test_as_designed", "settings_fixed", "all_fits_ok"]
@@ -202,8 +206,8 @@ def main():
           "validation ends before the first test month (from the saved predictions); test months as designed; "
           "settings fixed at the first fit's tuning")
     paths = figures(args.model, res)
-    print(f"\nSaved results/tables/07_{args.model}_audit.csv, 07_{args.model}_audit_builds.csv and "
-          f"{len(paths)} figures in results/tables/figures/")
+    print(f"\nSaved {res / 'tables'}/07_{args.model}_audit.csv, 07_{args.model}_audit_builds.csv and "
+          f"{len(paths)} figures in {res / 'tables' / 'figures'}/")
 
 
 if __name__ == "__main__":

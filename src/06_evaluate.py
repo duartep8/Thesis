@@ -810,7 +810,7 @@ def main():
                   f"          = {r.path2_data_at_a_settings:>+5.2f} {r.path2_tuning_on_b_data:>+5.2f}")
     else:
         print("\nNo cross-fit predictions found (run 05_train.py --cross-fit); decomposition skipped.")
-    print(f"\nSaved results/tables/06_{model}_*.csv; done in {time.time() - t0:,.0f}s")
+    print(f"\nSaved {Path(args.results) / 'tables'}/06_{model}_*.csv; done in {time.time() - t0:,.0f}s")
 
 
 if __name__ == "__main__":

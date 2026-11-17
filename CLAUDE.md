@@ -116,7 +116,15 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Work with parquet; read big files in chunks or by columns.
 - `data/raw_parquet/`: the raw WRDS download (global, 1960–2025) as verified parquet
   (`00_csv_to_parquet.py`).
-- `data/test_sample.parquet`: the 200 largest stocks each month, for quick tests.
+- Test data (rebuilt and checked 2026-11-17; byte-identical to the previous versions):
+  - `data/test_sample.parquet` (`02_test_sample.py`): the 200 largest stocks each month from
+    `clean.parquet`, all months (clean level, the input to 03, not a panel).
+  - `data/test_panel.parquet` (`03_panel.py --input data/test_sample.parquet --out
+    data/test_panel.parquet --universe 200 --reports data/test_run/current/reports`): the
+    test panel; scripts 04–07b take it with `--panel data/test_panel.parquet`.
+  - Test outputs (with PERMNOs) go to `data/test_run/current/` (`--out`/`--results`
+    `data/test_run/current/results`). Run chains as a script with `set -euo pipefail` (not
+    an inline `&&` chain, where `set -e` is ignored), one at a time.
 - `data/ff/`: Fama–French 5 factors (2x3) and momentum, monthly, from Kenneth French's
   data library; versions (CRSP vintage, SHA-256) in `data/ff/README.txt`.
 
@@ -194,7 +202,7 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Go step by step: explain what you will do, wait for my OK, then do it.
 - One script per step in `src/`, numbered (01_, 02_, ...).
 - No look-ahead: a model may only use data available before the month it predicts.
-- Test every script on the test sample first, then run on the full data.
+- Test every script on the test sample first (`data/test_panel.parquet`), then run on the full data.
 - Fixed random seeds; save every set of predictions so nothing is refit.
 - Each predictions file has a manifest (panel hash, test years, characteristics, model and
   tuning grid, seed, package versions, training-code hash; git commit recorded). 05 reuses
