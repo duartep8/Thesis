@@ -35,7 +35,9 @@ bootstrap p-values within each group (gross and net separately). Groups: yearly 
 for each window and validation share; the validation shares against each other for each
 window and frequency; every setup against the reference (expanding, yearly, 30%), fixed
 in advance as the main design. Identical series (15-year and expanding trained once) are
-marked and not tested.
+marked and not tested; a test that repeats another under the other name (e.g. 15y once 25%
+vs 30% = expanding once 25% vs 30%) is kept in the table, enters its Holm family once, and
+shares that test's adjusted p-value (column duplicate).
 
 Alphas: long-short returns (gross and net) on Mkt-RF, SMB, HML, RMW, CMA and Mom, OLS
 with Newey-West standard errors (6 lags).
@@ -559,10 +561,29 @@ def main():
             if s != REFERENCE:
                 add_test("vs_reference", s, REFERENCE)
     tests = pd.DataFrame(tests)
+    # Setups with identical return series (15y and expanding trained once: the same December 1989 fit)
+    # map to the first such setup, so a test repeated under another name enters each Holm family once.
+    canon = {}
+    for version in sens:
+        for kind in ("gross", "net"):
+            first = {}
+            for s in setups:
+                canon[(version, kind, s)] = first.setdefault(sens[version][s][kind].to_numpy().tobytes(), s)
+    key = lambda r, side: canon[(r["missing_version"], r["returns"], (r[f"{side}_window"], r[f"{side}_freq"], r[f"{side}_val"]))]
+    tests["pair"] = [repr((key(r, "a"), key(r, "b"))) for _, r in tests.iterrows()]
+    tests["name"] = [f"{r['a_window']} {r['a_freq']} {r['a_val']:g} vs {r['b_window']} {r['b_freq']} {r['b_val']:g}"
+                     for _, r in tests.iterrows()]
+    fam = ["group", "returns", "missing_version", "pair"]
+    tests["duplicate"] = ~tests["identical"] & (tests.groupby(fam).cumcount() > 0)
     tests["p_holm"] = np.nan
-    for _, idx in tests[~tests["identical"]].groupby(["group", "returns", "missing_version"]).groups.items():
+    for _, idx in tests[~tests["identical"] & ~tests["duplicate"]].groupby(["group", "returns", "missing_version"]).groups.items():
         tests.loc[idx, "p_holm"] = multipletests(tests.loc[idx, "p_boot"], method="holm")[1]
-    tests["note"] = np.where(tests["identical"], "identical return series; not tested", "")
+    tests["p_holm"] = tests.groupby(fam)["p_holm"].transform("first")  # duplicates share their twin's p_holm
+    twin = tests.groupby(fam)["name"].transform("first")
+    tests["note"] = np.select([tests["identical"], tests["duplicate"]],
+                              ["identical return series; not tested", "same test as " + twin + "; counted once in Holm"], "")
+    assert (tests.groupby(fam)["p_boot"].transform("nunique") == 1).all(), "a duplicate test has a different p-value"
+    tests = tests.drop(columns=["pair", "name"])
 
     # Break-even multiple at which yearly and once have equal net Sharpe ratios; p-values into the summary
     summary["breakeven_k_equal"] = np.nan
@@ -754,7 +775,9 @@ def main():
             gr, nt = grp[grp["returns"] == "gross"].iloc[0], grp[grp["returns"] == "net"].iloc[0]
             fmt = lambda r: (f"{r['diff']:>+11.2f}{r['p_boot']:>7.3f}{r['p_hac']:>7.3f}{r['p_holm']:>7.3f}" if not r['identical']
                              else f"{'identical':>11}{'':>21}")
-            print(f"  {lab(*key[:3]):<21}  {lab(*key[3:]):<21}{fmt(gr)}{fmt(nt)}")
+            print(f"  {lab(*key[:3]):<21}  {lab(*key[3:]):<21}{fmt(gr)}{fmt(nt)}" + ("  = " + gr["note"][13:] if gr["duplicate"] else ""))
+        print(f"  Holm within each family counts {int((~t['identical'] & ~t['duplicate'] & (t['returns'] == 'gross')).sum())}"
+              f" distinct tests ({int(t['duplicate'].sum() // 2)} repeated under the other name of the same fit)")
 
     print(f"\nAlphas (monthly) and factor loadings, FF5 + Mom, Newey-West {NW_LAGS} lags")
     print(f"  {'window':<10}{'freq':<7}{'val':>4} {'ret':<6}{'alpha':>7}{'t':>6}{'ann.':>7}"

@@ -81,6 +81,9 @@ how training choices and retraining affect forecasts and portfolio performance.
     Holm within each group. Groups: yearly vs once (each window × share); the three
     shares against each other (each window × frequency); each setup against the
     reference expanding, yearly, 30% (fixed in advance as the main design).
+    15y-once and expanding-once are the same fit, so a test that repeats another under the
+    other name (shares of once, and once vs the reference) is listed but counts once in its
+    Holm family and shares that test's adjusted p-value (`duplicate` column).
   - Alphas: FF5 + momentum, Newey–West 6 lags; gross and net.
   - Trading costs: cost = Σ |trade| × bidaskhl_21d / 2, the first month pays for the
     initial purchase. No intraday spreads, so bidaskhl_21d stays; it overstates large
