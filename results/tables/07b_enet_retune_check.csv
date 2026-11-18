@@ -1,3 +1,10 @@
-window,val_share,chosen_alpha,chosen_l1_ratio,chosen_val_r2,chosen_n_nonzero,ours_alpha,ours_l1_ratio,ours_val_r2,same_choice,max_grid_alpha_rel_diff,max_grid_val_r2_abs_diff,same_nonzero_share,same_rank_share,gap_best_to_second,max_n_iter,n_not_converged
-10y,0.3,0.0012618505,0.5,0.008553038,15,0.00126185,0.5,0.00855304,True,4.9047736e-06,7.7566032e-08,1,1,2.1830224e-07,2051,0
-expanding,0.3,0.0070626257,0.1,0.010268884,14,0.00706263,0.1,0.0102689,True,4.327048e-06,5.2582671e-08,1,1,2.6153172e-06,2613,0
+window,val_share,n_train,n_val,rows_match_05_fit_log,same_tuning_15y_expanding,grid_matches,chosen_alpha,chosen_l1_ratio,chosen_val_r2,chosen_n_nonzero,fallback,ours_alpha,ours_l1_ratio,ours_val_r2,same_choice,max_grid_val_r2_abs_diff,same_nonzero_share,same_disqualified,same_rank_share,gap_best_to_second_qualifying,max_n_iter,n_not_converged
+5y,0.25,44771,14930,True,True,True,0.0027697754,0.1,0.019407327,44,False,0.00276978,0.1,0.0194073,True,1.1474709e-07,1,True,1,1.5844888e-05,991,0
+5y,0.3,41787,17914,True,True,True,0.0038329197,0.1,0.0075288642,29,False,0.00383292,0.1,0.00752886,True,1.7972007e-07,1,True,1,2.7192291e-05,919,0
+5y,0.35,38804,20897,True,True,True,0.0052092738,0.1,0.014503025,23,False,0.00520927,0.1,0.014503,True,8.8499145e-07,1,True,1,6.3281435e-05,1762,0
+10y,0.25,89630,29846,True,True,True,0.0021473192,0.1,0.0021083488,48,False,0.00214732,0.1,0.00210835,True,2.0832741e-08,1,True,1,6.9661253e-06,2030,0
+10y,0.3,83659,35817,True,True,True,0.0012618505,0.5,0.008553038,15,False,0.00126185,0.5,0.00855304,True,7.7566032e-08,1,True,1,2.1830224e-07,2051,0
+10y,0.35,77692,41784,True,True,True,0.0087785878,0.1,0.0032285467,11,False,0.00877859,0.1,0.00322855,True,3.7534147e-08,1,True,1,6.1899761e-06,2308,0
+15y/expanding,0.25,134574,44767,True,True,True,0.0094607841,0.1,0.0033038804,9,False,0.00946078,0.1,0.00330388,True,4.0279118e-08,1,True,1,1.3911552e-06,2596,0
+15y/expanding,0.3,125618,53723,True,True,True,0.0070626257,0.1,0.010268884,14,False,0.00706263,0.1,0.0102689,True,5.2582671e-08,1,True,1,2.6153172e-06,2613,0
+15y/expanding,0.35,116662,62679,True,True,True,0.0096095847,0.1,0.012998346,7,False,0.00960958,0.1,0.0129983,True,5.8401256e-08,1,True,1,9.9770189e-06,1762,0

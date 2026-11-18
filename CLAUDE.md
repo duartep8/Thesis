@@ -161,8 +161,10 @@ how training choices and retraining affect forecasts and portfolio performance.
     Stock guide): A or P (MthRet includes the delisting return, so JKP counted it twice) →
     corrected to (1 + ret)/(1 + delret) − 1 − rf (rf from the delisting-month row): `fixed`
     (`unchanged` if delret = 0 or −1). M or G (MthRet excludes it, so JKP's single
-    compounding, or its −30% for a missing delret, stands) → `unchanged`; JKP's ×0.70 on
-    Nasdaq → ×0.45 (Shumway & Warther −55%): `nasdaq55`.
+    compounding, or its −30% for a missing delret, stands) → `unchanged`; for M only, JKP's
+    ×0.70 on Nasdaq → ×0.45 (Shumway & Warther −55%): `nasdaq55`. G keeps JKP's value by
+    design: a G delisting has a return, just dated more than 10 days after the delisting,
+    so it is not a missing delisting return to impute.
   - Pattern rule, for V and for months without a flag, and as a logged check on every row
     (each disagreement with the flag is listed in `data/reports/01_clean.log`): compare
     (1 + ret) / price relative with (1 + delret)^k; k = 2 → `fixed`, k = 1 → `unchanged`;
@@ -190,7 +192,11 @@ how training choices and retraining affect forecasts and portfolio performance.
 - Suspect returns: `ret_exc_lead1m` ≤ −0.90 while the stock's `me` in t+1 is at least
   50% of its `me` in t. The original is kept in `ret_exc_lead1m_raw`, the row is
   flagged in `ret_exc_lead1m_suspect`, and `ret_exc_lead1m` is set to missing: dropped
-  from training; in portfolios it counts as 0 and is logged (3 rows in 1975–2025).
+  from training; in portfolios it counts as 0 and is logged. The rule uses `me` at t+1,
+  information from after the formation date, so it is a data-cleaning rule on the target
+  (month t+1 data anyway), not a signal; it applies in every month, the test period
+  included. It censors 3 rows in 1975–2025, return months 1975-12, 1984-01 and 1989-08,
+  so none in the 1990–2025 test period.
 - A held stock with a still-missing return (suspect returns, trading halts without a CRSP
   delisting record, a few gaps) counts as 0 and is logged (baseline). Sensitivity
   (`04_portfolios.py --missing-return -0.3 --missing-scope all|distressed`): it counts as

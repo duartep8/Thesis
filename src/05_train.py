@@ -252,9 +252,9 @@ class LightGBM:
         return lgb.train(p, lgb.Dataset(X, y, params=p), num_boost_round=settings["n_trees"])
 
     def predict(self, model, X):
-        pred = model.predict(X)
-        check(np.ptp(pred) > 0, "LightGBM fit predicts a constant")
-        return pred
+        # a constant fit is not an error: run_setup flags it (constant_fit) and the setup is marked
+        # near_constant_rule_failed in the summary, as for the elastic net
+        return model.predict(X)
 
     def n_nonzero(self, model):
         """Characteristics used in at least one split."""
@@ -305,12 +305,20 @@ def git_version():
     return run("rev-parse", "HEAD") or "unknown", bool(run("status", "--porcelain", "src"))
 
 
-def training_code_sha256(model):
-    """Hash of the source of everything that turns the panel into predictions."""
+PROTOCOL_CONSTANTS = ("MIN_DISTINCT", "SEED")  # module-level constants that shape the predictions
+
+
+def training_code_sha256(model, override=None):
+    """Hash of the source of everything that turns the panel into predictions: the model class, the
+    data, window and prediction code, the protocol helpers (demeaning, validation scorer,
+    near-constant rule) and PROTOCOL_CONSTANTS (override: replace some, for the self-check)."""
     cls = vars(type(model))
     parts = [inspect.getsource(f) for f in [v for v in cls.values() if inspect.isfunction(v)]
-             + [load_data, run_setup, r2_oos, month_index, window_label, setup_name]]
+             + [load_data, run_setup, r2_oos, month_index, window_label, setup_name,
+                demean_by_month, distinct_per_month, validation_scorer, choose]]
     parts.append(repr(sorted((k, v) for k, v in cls.items() if k.isupper() or k == "name")))
+    consts = {k: globals()[k] for k in PROTOCOL_CONSTANTS} | (override or {})
+    parts.append(repr(sorted(consts.items())))
     return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
@@ -462,7 +470,8 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
         fitted = cache[key]
         model.save(fitted, model_dir / f"{name}_{b}", data["chars"])
 
-        pred = (demean_by_month(model.predict(fitted, X), m_idx) + c).astype("float32")
+        raw = model.predict(fitted, X)
+        pred = (demean_by_month(raw, m_idx) + c).astype("float32")
         test0 = ret_year == b + 1
         dist = distinct_per_month(pred[test0], m_idx[test0]) if test0.any() else np.array([0])
         settings_json = json.dumps(settings, sort_keys=True)
@@ -480,7 +489,9 @@ def run_setup(model, data, window, val, builds, test_end, out, cache, fit_log, t
             parts.append(frame((ret_year > b) & (ret_year <= test_end), "once"))
         fit_log.append({"window": window_label(window), "val_share": val, "build_year": b,
                         "train_months": split - lo + 1, "val_months": n_val, "n_train": int(tr.sum()), "n_val": int(va.sum()),
-                        "val_r2": r2_oos(y[va], pred[va]), "n_nonzero": model.n_nonzero(fitted), "constant": c,
+                        # validation R^2 as in the tuning: output demeaned over the validation rows, plus c
+                        "val_r2": validation_scorer(y[va], m_idx[va], c)["r2"](raw[va]),
+                        "n_nonzero": model.n_nonzero(fitted), "constant": c, "constant_fit": bool(np.ptp(raw) == 0),
                         "distinct_test_median": float(np.median(dist)), "distinct_test_min": int(dist.min()),
                         "seconds": time.time() - t0})
         f = fit_log[-1]
@@ -593,6 +604,8 @@ def main():
     run = {"test_start": args.test_start, "test_end": args.test_end, "panel_sha256": file_sha256(args.panel),
            "chars": chars, "code_sha256": training_code_sha256(model), "git_commit": commit, "git_dirty": dirty,
            "panel": str(args.panel)}
+    check(all(training_code_sha256(model, {k: globals()[k] + 1}) != run["code_sha256"] for k in PROTOCOL_CONSTANTS),
+          "self-check: the training-code hash ignores a protocol constant")
     print(f"Panel: {len(df):,} rows, return months {df['ret_month'].min():%Y-%m} to {df['ret_month'].max():%Y-%m}; "
           f"model {model.name}; test years {args.test_start}-{args.test_end}")
     print(f"Provenance: panel sha256 {run['panel_sha256'][:12]}..., training code sha256 {run['code_sha256'][:12]}..., "
@@ -656,7 +669,10 @@ def main():
                                                    near_constant_rule_failed=("near_constant_rule_failed", "any")).reset_index()
     summary["val_share"] = summary["val_share"].round(4)
     summary = summary.merge(nc, on=["window", "val_share"], how="left")
-    summary.loc[summary["near_constant_rule_failed"].fillna(False).astype(bool), "note"] += "near-constant rule failed (fallback); "
+    # a fit predicting a constant (no grid choice to fall back on) also marks the setup
+    summary["near_constant_rule_failed"] = (summary["near_constant_rule_failed"].fillna(False).astype(bool)
+                                            | (summary["constant_fits"] > 0))
+    summary.loc[summary["near_constant_rule_failed"], "note"] += "near-constant rule failed (fallback or constant fit); "
     summary.to_csv(tables / f"05_{model.name}_summary.csv", index=False, float_format="%.6g")
 
     if model.name == "lgbm":

@@ -1,0 +1,7 @@
+learning_rate,num_leaves,min_child_samples,n_trees,val_r2,min_distinct,trees_grown,tree_sum_vs_predict,chosen,fallback,n_trees_05,val_r2_05,min_distinct_05,chosen_05,rule,grid_point_in_both,same_n_trees,val_r2_abs_diff,same_min_distinct,rule_07b,rows_match_05_fit_log
+0.05,7,200,50,0.011205305,989,100,0,False,False,50,0.0112053,989,False,,True,True,4.8964259e-09,True,,True
+0.05,7,1000,64,0.011247298,989,114,0,False,False,64,0.0112473,989,False,,True,True,1.936035e-09,True,,True
+0.05,15,200,42,0.011407061,989,92,0,False,False,42,0.0114071,989,False,,True,True,3.9086532e-08,True,,True
+0.05,15,1000,42,0.011467763,989,92,0,True,False,42,0.0114678,989,True,,True,True,3.6695977e-08,True,,True
+0.05,31,200,29,0.011234154,989,79,0,False,False,29,0.0112342,989,False,,True,True,4.5849307e-08,True,,True
+0.05,31,1000,27,0.01142012,989,77,0,False,False,27,0.0114201,989,False,,True,True,2.0305727e-08,True,,True
